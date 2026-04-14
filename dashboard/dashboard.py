@@ -1069,61 +1069,147 @@ with aba5:
 
 
 # ══════════════════════════════════════════════════════════════
-# ABA 6 — HISTÓRICO
+# ABA 6 — HISTÓRICO DE OPERAÇÕES REAIS
 # ══════════════════════════════════════════════════════════════
 with aba6:
-    df_hist = analyzer.carregar_historico_df()
-    stats   = analyzer.estatisticas_historico()
+    st.markdown("### 📊 Histórico de Operações Reais")
 
-    if df_hist.empty:
+    todas_posicoes = pos.listar_todas()
+    fechadas_hist  = [p for p in todas_posicoes if p["status"] == "fechada"]
+    abertas_hist   = [p for p in todas_posicoes if p["status"] == "aberta"]
+    resumo_hist    = pos.resumo_fechadas()
+
+    if not todas_posicoes:
         st.markdown("""
         <div style="background:#1a1f35; border:1px solid #2d3250; border-radius:10px;
                     padding:40px; text-align:center;">
             <p style="font-size:40px; margin:0;">📋</p>
-            <p style="font-size:16px; color:#fff; margin:10px 0 4px;">Histórico ainda vazio</p>
-            <p style="font-size:13px; color:#8892b0;">Oportunidades detectadas serão registradas automaticamente aqui.</p>
+            <p style="font-size:16px; color:#fff; margin:10px 0 4px;">Nenhuma operação executada ainda</p>
+            <p style="font-size:13px; color:#8892b0;">
+                Operações executadas pelo robô ou importadas do MT5 aparecerão aqui.
+            </p>
         </div>
         """, unsafe_allow_html=True)
     else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total de Oportunidades", stats.get("total_oportunidades", 0))
-        c2.metric("Pares com Ocorrências",  stats.get("pares_ativos", 0))
-        c3.metric("Z-Score Médio",          stats.get("zscore_medio", 0))
-        c4.metric("Setor Mais Ativo",       stats.get("setor_mais_ativo", "—"))
+        # ── Métricas ───────────────────────────────────────────
+        total_ops   = len(todas_posicoes)
+        total_aber  = len(abertas_hist)
+        total_fech  = len(fechadas_hist)
+        pl_total    = resumo_hist.get("pl_total", 0)
+        taxa_acerto = resumo_hist.get("taxa_acerto", 0)
+        pl_cor      = "green" if pl_total >= 0 else "red"
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Total Executadas",  total_ops)
+        c2.metric("Abertas",           total_aber)
+        c3.metric("Fechadas",          total_fech)
+        c4.metric("Taxa de Acerto",    f"{taxa_acerto}%" if fechadas_hist else "—")
+        c5.metric("P&L Total",         f"R$ {pl_total:+,.2f}" if fechadas_hist else "—",
+                  delta=f"{pl_total:+.2f}" if fechadas_hist else None)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        col_g1, col_g2 = st.columns(2)
+        # ── Gráficos (só se tiver fechadas) ───────────────────
+        if fechadas_hist:
+            col_g1, col_g2 = st.columns(2)
 
-        with col_g1:
-            contagem = df_hist.groupby("par").size().reset_index(name="n")
-            fig_bar = px.bar(contagem.sort_values("n"), x="n", y="par",
-                             orientation="h", template="plotly_dark",
-                             color="n", color_continuous_scale="Blues",
-                             title="Oportunidades por Par")
-            fig_bar.update_layout(
-                paper_bgcolor="#1a1f35", plot_bgcolor="#1a1f35",
-                height=350, showlegend=False, coloraxis_showscale=False,
-                margin=dict(t=40, b=20, l=20, r=20)
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
+            with col_g1:
+                # P&L acumulado ao longo do tempo
+                pls = [p["pl_final"] for p in fechadas_hist if p.get("pl_final") is not None]
+                datas = [p.get("data_fechamento", "")[:10] for p in fechadas_hist
+                         if p.get("pl_final") is not None]
+                pl_acum = []
+                acc = 0
+                for v in pls:
+                    acc += v
+                    pl_acum.append(round(acc, 2))
 
-        with col_g2:
-            if "setor" in df_hist.columns:
-                cont_s = df_hist.groupby("setor").size().reset_index(name="n")
-                fig_pie = px.pie(cont_s, names="setor", values="n",
-                                 template="plotly_dark", title="Por Setor",
-                                 color_discrete_sequence=px.colors.sequential.Blues_r)
-                fig_pie.update_layout(
-                    paper_bgcolor="#1a1f35",
-                    height=350, margin=dict(t=40, b=20, l=20, r=20)
+                fig_acum = go.Figure()
+                fig_acum.add_trace(go.Scatter(
+                    x=list(range(1, len(pl_acum)+1)),
+                    y=pl_acum,
+                    mode="lines+markers",
+                    line=dict(color="#00e676" if pl_acum[-1] >= 0 else "#ff5252", width=2),
+                    marker=dict(size=6),
+                    name="P&L Acumulado",
+                    fill="tozeroy",
+                    fillcolor="rgba(0,230,118,0.1)" if pl_acum[-1] >= 0 else "rgba(255,82,82,0.1)",
+                ))
+                fig_acum.add_hline(y=0, line_dash="dash", line_color="#8892b0", line_width=1)
+                fig_acum.update_layout(
+                    title="P&L Acumulado (R$)",
+                    paper_bgcolor="#1a1f35", plot_bgcolor="#1a1f35",
+                    font=dict(color="#ffffff"), height=300,
+                    margin=dict(t=40, b=20, l=20, r=20),
+                    xaxis=dict(title="Operação nº", gridcolor="#2d3250"),
+                    yaxis=dict(gridcolor="#2d3250"),
+                    showlegend=False,
                 )
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_acum, use_container_width=True)
+
+            with col_g2:
+                # P&L por par
+                pl_por_par = {}
+                for p in fechadas_hist:
+                    chave = f"{p['par_a']}/{p['par_b']}"
+                    pl_por_par[chave] = pl_por_par.get(chave, 0) + (p.get("pl_final") or 0)
+
+                pares_nomes = list(pl_por_par.keys())
+                pares_vals  = list(pl_por_par.values())
+                cores = ["#00e676" if v >= 0 else "#ff5252" for v in pares_vals]
+
+                fig_par = go.Figure(go.Bar(
+                    x=pares_vals, y=pares_nomes,
+                    orientation="h",
+                    marker_color=cores,
+                ))
+                fig_par.update_layout(
+                    title="P&L por Par (R$)",
+                    paper_bgcolor="#1a1f35", plot_bgcolor="#1a1f35",
+                    font=dict(color="#ffffff"), height=300,
+                    margin=dict(t=40, b=20, l=20, r=20),
+                    xaxis=dict(gridcolor="#2d3250"),
+                    yaxis=dict(gridcolor="#2d3250"),
+                )
+                st.plotly_chart(fig_par, use_container_width=True)
+
+        # ── Tabela completa ────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 📋 Todas as Operações")
+
+        linhas = []
+        for p in reversed(todas_posicoes):
+            origem_label = "📥 Manual" if p.get("origem") == "manual" else "🤖 Robô"
+            pl_val = p.get("pl_final")
+            linhas.append({
+                "Origem":       origem_label,
+                "Par":          f"{p['par_a']} / {p['par_b']}",
+                "Setor":        p.get("setor", "—"),
+                "Sinal":        p.get("sinal", "—"),
+                "Entrada":      f"{p['data_entrada']} {p['hora_entrada']}",
+                "Z Entrada":    p.get("zscore_entrada", "—"),
+                "Preço A":      f"R$ {p['preco_entrada_a']:.2f}",
+                "Preço B":      f"R$ {p['preco_entrada_b']:.2f}",
+                "Fechamento":   p.get("data_fechamento") or "—",
+                "Z Saída":      p.get("zscore_saida") or "—",
+                "P&L (R$)":     round(pl_val, 2) if pl_val is not None else "—",
+                "Status":       "✅ Fechada" if p["status"] == "fechada" else "🔵 Aberta",
+            })
+
+        df_todas = pd.DataFrame(linhas)
+
+        def cor_pl_hist(val):
+            try:
+                return "color: #00e676" if float(val) >= 0 else "color: #ff5252"
+            except Exception:
+                return "color: #8892b0"
 
         st.dataframe(
-            df_hist[["data","hora","par","setor","zscore","texto","preco_a","preco_b"]],
-            use_container_width=True, height=350
+            df_todas.style.map(cor_pl_hist, subset=["P&L (R$)"]),
+            use_container_width=True,
+            height=400,
         )
 
-        csv = df_hist.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Exportar CSV", csv, "historico.csv", "text/csv")
+        csv_hist = df_todas.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Exportar operações", csv_hist,
+                           "historico_operacoes.csv", "text/csv")
