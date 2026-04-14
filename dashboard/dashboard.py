@@ -224,9 +224,34 @@ if _sync["fechamentos"] > 0:
 
 
 # ── Carrega dados ────────────────────────────────────────────
+import json as _json
+
+ROBOT_STATUS_FILE = "robot_status.json"
+
+def _salvar_status_robo(n_opor: int, n_exec: int):
+    try:
+        _json.dump({
+            "ultimo_ciclo":   datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            "oportunidades":  n_opor,
+            "execucoes":      n_exec,
+        }, open(ROBOT_STATUS_FILE, "w", encoding="utf-8"))
+    except Exception:
+        pass
+
+def _ler_status_robo() -> dict:
+    try:
+        return _json.load(open(ROBOT_STATUS_FILE, "r", encoding="utf-8"))
+    except Exception:
+        return {}
+
 @st.cache_data(ttl=60)
 def carregar_analise():
-    return analyzer.analisar_todos_pares(PARES)
+    res = analyzer.analisar_todos_pares(PARES)
+    n_opor = sum(1 for r in res if r.get("sinal") in ("VENDER_A", "COMPRAR_A"))
+    log    = gestor.carregar_log()
+    n_exec = len([l for l in log if l.get("timestamp","")[:10] == datetime.now().strftime("%d/%m/%Y")])
+    _salvar_status_robo(n_opor, n_exec)
+    return res
 
 with st.spinner("Calculando Z-scores..."):
     resultados = carregar_analise()
@@ -239,6 +264,71 @@ oportunidades = [r for r in resultados if r.get("sinal") in ("VENDER_A", "COMPRA
 monitorando   = [r for r in resultados if r.get("sinal") == "MONITORANDO"]
 neutros       = [r for r in resultados if r.get("sinal") == "NEUTRO"]
 com_erro      = [r for r in resultados if r.get("erro")]
+
+
+# ── Barra de status do robô ───────────────────────────────────
+_cfg_robo   = cfg_op.get_config()
+_auto_on    = _cfg_robo.get("auto_executar", False)
+_sim_on     = _cfg_robo.get("modo_simulacao", True)
+_status_arq = _ler_status_robo()
+_ult_ciclo  = _status_arq.get("ultimo_ciclo", "—")
+_n_opor_arq = _status_arq.get("oportunidades", 0)
+_n_exec_arq = _status_arq.get("execucoes", 0)
+
+_h_ini = cfg_op.get_horario_inicio()
+_h_fim = cfg_op.get_horario_fim()
+_agora_t   = datetime.now().time()
+_hi_t = datetime.strptime(_h_ini, "%H:%M").time()
+_hf_t = datetime.strptime(_h_fim, "%H:%M").time()
+_mercado_ok = _hi_t <= _agora_t <= _hf_t
+
+if _auto_on and not _sim_on and _mercado_ok:
+    _robo_cor    = "#00e676"
+    _robo_icone  = "🟢"
+    _robo_status = "ROBÔ ATIVO — enviando ordens reais ao MT5"
+elif _auto_on and _sim_on:
+    _robo_cor    = "#ffd600"
+    _robo_icone  = "🟡"
+    _robo_status = "ROBÔ EM SIMULAÇÃO — calculando ordens mas NÃO enviando ao MT5"
+elif _auto_on and not _mercado_ok:
+    _robo_cor    = "#ff9100"
+    _robo_icone  = "🟠"
+    _robo_status = f"ROBÔ AGUARDANDO HORÁRIO — fora da janela {_h_ini}–{_h_fim}"
+else:
+    _robo_cor    = "#ff5252"
+    _robo_icone  = "🔴"
+    _robo_status = "ROBÔ DESLIGADO — Execução Automática está OFF na aba Gestão"
+
+st.markdown(f"""
+<div style="background:#12191f; border:1px solid {_robo_cor}44;
+            border-left: 4px solid {_robo_cor};
+            border-radius:10px; padding:14px 24px; margin-bottom:16px;
+            display:flex; flex-wrap:wrap; gap:24px; align-items:center;">
+    <div>
+        <span style="font-size:16px; font-weight:700; color:{_robo_cor};">
+            {_robo_icone} {_robo_status}
+        </span>
+    </div>
+    <div style="display:flex; gap:24px; flex-wrap:wrap; margin-left:auto;">
+        <div style="text-align:center;">
+            <div style="font-size:10px; color:#8892b0; text-transform:uppercase; letter-spacing:1px;">Último ciclo</div>
+            <div style="font-size:14px; font-weight:600; color:#fff;">{_ult_ciclo}</div>
+        </div>
+        <div style="text-align:center;">
+            <div style="font-size:10px; color:#8892b0; text-transform:uppercase; letter-spacing:1px;">Oportunidades hoje</div>
+            <div style="font-size:14px; font-weight:600; color:#ffd600;">{_n_opor_arq}</div>
+        </div>
+        <div style="text-align:center;">
+            <div style="font-size:10px; color:#8892b0; text-transform:uppercase; letter-spacing:1px;">Ordens hoje</div>
+            <div style="font-size:14px; font-weight:600; color:#00e676;">{_n_exec_arq}</div>
+        </div>
+        <div style="text-align:center;">
+            <div style="font-size:10px; color:#8892b0; text-transform:uppercase; letter-spacing:1px;">Ciclo</div>
+            <div style="font-size:14px; font-weight:600; color:#8892b0;">60s</div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ── Métricas do topo ─────────────────────────────────────────
