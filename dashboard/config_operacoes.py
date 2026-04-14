@@ -11,6 +11,7 @@ DEFAULTS = {
     "auto_executar":      False,   # ligado/desligado pelo painel
     "modo_simulacao":     True,    # True = não executa ordens reais
     "percentual_capital": 30,      # % do saldo para operar
+    "capital_manual":     0.0,     # 0 = usar saldo do MT5; > 0 = usar este valor
     "pares_habilitados":  {},      # { "PETR3F_PETR4F": True, ... }
     "qtd_maxima":         {},      # { "PETR3F_PETR4F": 100, ... }  0 = sem limite
 }
@@ -58,6 +59,9 @@ def is_par_habilitado(par_a: str, par_b: str) -> bool:
     cfg = _carregar()
     return cfg["pares_habilitados"].get(_chave(par_a, par_b), False)
 
+def get_capital_manual() -> float:
+    return float(_carregar().get("capital_manual", 0.0))
+
 def get_qtd_maxima(par_a: str, par_b: str) -> int:
     """Retorna qtd máxima configurada. 0 = sem limite (usa cálculo pelo saldo)."""
     cfg = _carregar()
@@ -84,6 +88,11 @@ def set_percentual(valor: float):
 def set_par_habilitado(par_a: str, par_b: str, habilitado: bool):
     cfg = _carregar()
     cfg["pares_habilitados"][_chave(par_a, par_b)] = habilitado
+    _salvar(cfg)
+
+def set_capital_manual(valor: float):
+    cfg = _carregar()
+    cfg["capital_manual"] = max(0.0, float(valor))
     _salvar(cfg)
 
 def set_qtd_maxima(par_a: str, par_b: str, qtd: int):

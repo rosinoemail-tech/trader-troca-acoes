@@ -38,10 +38,18 @@ def get_saldo() -> float:
     return info.balance
 
 def get_saldo_livre() -> float:
+    """
+    Retorna o capital disponível para operações.
+    Prioridade: capital_manual (se > 0) → margin_free do MT5 → 0
+    """
+    capital_manual = cfg.get_capital_manual()
+    if capital_manual > 0:
+        return capital_manual
+
     info = mt5.account_info()
     if info is None:
         return 0.0
-    return info.margin_free
+    return info.margin_free if info.margin_free > 0 else 0.0
 
 def get_info_conta() -> dict:
     info = mt5.account_info()

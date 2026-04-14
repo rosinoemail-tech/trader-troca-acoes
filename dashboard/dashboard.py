@@ -700,6 +700,8 @@ with aba5:
 
     # ── Conta MT5 ──────────────────────────────────────────
     st.markdown("### 🏦 Conta MT5 — Genial")
+    capital_manual_cfg = cfg_op.get_capital_manual()
+
     if conta:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Saldo",        f"R$ {conta['saldo']:,.2f}")
@@ -709,6 +711,14 @@ with aba5:
                   delta=f"{conta['lucro']:+.2f}")
     else:
         st.warning("Não foi possível obter dados da conta. MT5 conectado?")
+
+    # Capital usado para cálculo de ordens (manual sobrepõe MT5)
+    saldo_efetivo = capital_manual_cfg if capital_manual_cfg > 0 else (
+        conta.get("margem_livre", 0) if conta else 0
+    )
+    if capital_manual_cfg > 0:
+        st.info(f"💼 **Capital Manual Ativo:** R$ {capital_manual_cfg:,.2f} "
+                f"— este valor é usado para calcular as ordens (substitui o saldo do MT5)")
 
     st.markdown("---")
 
@@ -737,19 +747,60 @@ with aba5:
 
     with col_c:
         pct = st.slider(
-            "💰 % do saldo para operar",
+            "💰 % do capital para operar",
             min_value=1, max_value=100,
             value=int(config_atual.get("percentual_capital", 30)),
             step=1,
-            help="Percentual do saldo livre que será distribuído entre os pares habilitados"
+            help="Percentual do capital disponível que será distribuído entre os pares habilitados"
         )
         if pct != config_atual.get("percentual_capital"):
             cfg_op.set_percentual(pct)
 
-    # Preview do capital alocado
-    if conta:
-        capital_alocado = conta["margem_livre"] * (pct / 100)
-        st.info(f"💡 Com {pct}% do saldo livre → **R$ {capital_alocado:,.2f}** disponível para operar")
+    # ── Capital Manual ─────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### 💼 Capital Disponível para Operações")
+    st.caption("Se o saldo do MT5 aparecer zerado (problema de integração Genial), "
+               "informe o valor manualmente. Zero = usar saldo real do MT5.")
+
+    col_cap1, col_cap2 = st.columns([2, 3])
+    with col_cap1:
+        cap_input = st.number_input(
+            "Capital Manual (R$)  —  0 = usar MT5",
+            min_value=0.0,
+            max_value=10_000_000.0,
+            value=float(config_atual.get("capital_manual", 0.0)),
+            step=100.0,
+            format="%.2f",
+            key="capital_manual_input",
+        )
+        if cap_input != config_atual.get("capital_manual", 0.0):
+            cfg_op.set_capital_manual(cap_input)
+            st.rerun()
+
+    with col_cap2:
+        capital_alocado = saldo_efetivo * (pct / 100)
+        fonte = "Manual" if capital_manual_cfg > 0 else "MT5"
+        cor_fonte = "#64b5f6" if capital_manual_cfg > 0 else "#81c784"
+        st.markdown(f"""
+        <div style="background:#1a1f35; border:1px solid #2d3250; border-radius:10px;
+                    padding:16px 20px; margin-top:4px;">
+            <div style="font-size:11px; color:#8892b0; text-transform:uppercase;
+                        letter-spacing:1px; margin-bottom:6px;">
+                Capital base
+                <span style="color:{cor_fonte}; margin-left:8px;">({fonte})</span>
+            </div>
+            <div style="font-size:28px; font-weight:700; color:#fff;">
+                R$ {saldo_efetivo:,.2f}
+            </div>
+            <div style="font-size:13px; color:#8892b0; margin-top:4px;">
+                Com {pct}% →
+                <span style="color:#ffd600; font-weight:600;">
+                    R$ {capital_alocado:,.2f}
+                </span>
+                disponível para distribuir nos pares
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     if auto and not simulacao:
         st.error("⚠️ **ATENÇÃO: Execução Automática REAL ativada.** "
