@@ -13,6 +13,8 @@ from pares import PARES
 import mt5_connector as mt5c
 import analyzer
 import posicoes as pos
+import config_operacoes as cfg_op
+import gestor_ordens as gestor
 
 # ── Configuração ─────────────────────────────────────────────
 st.set_page_config(
@@ -266,11 +268,12 @@ st.markdown("---")
 
 
 # ── Abas ─────────────────────────────────────────────────────
-aba1, aba2, aba3, aba4, aba5 = st.tabs([
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "🔥  Oportunidades",
     "📈  Gráficos Z-Score",
     "📋  Todos os Pares",
     "💰  Simulador P&L",
+    "⚙️  Gestão",
     "📊  Histórico",
 ])
 
@@ -668,9 +671,182 @@ with aba4:
 
 
 # ══════════════════════════════════════════════════════════════
-# ABA 5 — HISTÓRICO
+# ABA 5 — GESTÃO DE OPERAÇÕES
 # ══════════════════════════════════════════════════════════════
 with aba5:
+
+    config_atual = cfg_op.get_config()
+    conta = gestor.get_info_conta()
+
+    # ── Conta MT5 ──────────────────────────────────────────
+    st.markdown("### 🏦 Conta MT5 — Genial")
+    if conta:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Saldo",        f"R$ {conta['saldo']:,.2f}")
+        c2.metric("Equity",       f"R$ {conta['equity']:,.2f}")
+        c3.metric("Margem Livre", f"R$ {conta['margem_livre']:,.2f}")
+        c4.metric("Lucro Aberto", f"R$ {conta['lucro']:,.2f}",
+                  delta=f"{conta['lucro']:+.2f}")
+    else:
+        st.warning("Não foi possível obter dados da conta. MT5 conectado?")
+
+    st.markdown("---")
+
+    # ── Controles globais ──────────────────────────────────
+    st.markdown("### ⚙️ Configurações Globais")
+
+    col_a, col_b, col_c = st.columns(3)
+
+    with col_a:
+        simulacao = st.toggle(
+            "🔵 Modo Simulação (sem ordens reais)",
+            value=config_atual.get("modo_simulacao", True),
+            help="Ligado = calcula tudo mas NÃO envia ordens ao MT5"
+        )
+        if simulacao != config_atual.get("modo_simulacao"):
+            cfg_op.set_simulacao(simulacao)
+
+    with col_b:
+        auto = st.toggle(
+            "🤖 Execução Automática",
+            value=config_atual.get("auto_executar", False),
+            help="Quando ativado, executa ordens automaticamente a cada atualização"
+        )
+        if auto != config_atual.get("auto_executar"):
+            cfg_op.set_auto_executar(auto)
+
+    with col_c:
+        pct = st.slider(
+            "💰 % do saldo para operar",
+            min_value=1, max_value=100,
+            value=int(config_atual.get("percentual_capital", 30)),
+            step=1,
+            help="Percentual do saldo livre que será distribuído entre os pares habilitados"
+        )
+        if pct != config_atual.get("percentual_capital"):
+            cfg_op.set_percentual(pct)
+
+    # Preview do capital alocado
+    if conta:
+        capital_alocado = conta["margem_livre"] * (pct / 100)
+        st.info(f"💡 Com {pct}% do saldo livre → **R$ {capital_alocado:,.2f}** disponível para operar")
+
+    if auto and not simulacao:
+        st.error("⚠️ **ATENÇÃO: Execução Automática REAL ativada.** "
+                 "O sistema enviará ordens reais ao MT5 quando detectar oportunidades nos pares habilitados.")
+    elif auto and simulacao:
+        st.success("✅ Execução Automática em **MODO SIMULAÇÃO** — ordens calculadas mas não enviadas ao MT5.")
+
+    st.markdown("---")
+
+    # ── Habilitar / desabilitar pares ──────────────────────
+    st.markdown("### 📋 Pares — Habilitar para operação automática")
+
+    col_btn1, col_btn2, _ = st.columns([1, 1, 5])
+    with col_btn1:
+        if st.button("✅ Habilitar todos"):
+            cfg_op.habilitar_todos(PARES)
+            st.rerun()
+    with col_btn2:
+        if st.button("❌ Desabilitar todos"):
+            cfg_op.desabilitar_todos(PARES)
+            st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Agrupa por setor
+    setores = {}
+    for par in PARES:
+        setores.setdefault(par["setor"], []).append(par)
+
+    pares_habilitados_count = 0
+
+    for setor, pares_setor in setores.items():
+        st.markdown(f"**{setor}**")
+        cols = st.columns(min(len(pares_setor), 3))
+
+        for i, par in enumerate(pares_setor):
+            habilitado = config_atual["pares_habilitados"].get(
+                f"{par['par_a']}_{par['par_b']}", False
+            )
+            if habilitado:
+                pares_habilitados_count += 1
+
+            # Busca Z-score atual
+            dado_par = next(
+                (r for r in resultados
+                 if r.get("par_a") == par["par_a"] and r.get("par_b") == par["par_b"]),
+                None
+            )
+            z_str = f"Z: {dado_par['zscore_atual']:+.2f}" if dado_par and dado_par.get("zscore_atual") else "Z: —"
+            emoji_z = dado_par.get("emoji", "⚪") if dado_par else "⚪"
+
+            with cols[i % 3]:
+                novo = st.checkbox(
+                    f"{emoji_z} {par['par_a']} / {par['par_b']}  `{z_str}`",
+                    value=habilitado,
+                    key=f"ck_{par['par_a']}_{par['par_b']}"
+                )
+                if novo != habilitado:
+                    cfg_op.set_par_habilitado(par["par_a"], par["par_b"], novo)
+                    st.rerun()
+
+        st.markdown("")
+
+    # Preview da distribuição de capital
+    if pares_habilitados_count > 0 and conta:
+        capital_total = conta["margem_livre"] * (pct / 100)
+        capital_por_par = capital_total / pares_habilitados_count
+
+        st.markdown("---")
+        st.markdown(f"### 💡 Distribuição de Capital — {pares_habilitados_count} par(es) habilitado(s)")
+
+        oport_habilitadas = [
+            r for r in resultados
+            if r.get("sinal") in ("VENDER_A", "COMPRAR_A")
+            and cfg_op.is_par_habilitado(r["par_a"], r["par_b"])
+        ]
+
+        if oport_habilitadas:
+            st.success(f"🔥 {len(oport_habilitadas)} oportunidade(s) ativa(s) nos pares habilitados")
+            dist = gestor.calcular_distribuicao(oport_habilitadas)
+
+            linhas_dist = []
+            for op in dist:
+                linhas_dist.append({
+                    "Par":            f"{op['par_a']} / {op['par_b']}",
+                    "Z-Score":        f"{op['zscore_atual']:+.3f}",
+                    "Sinal":          op["texto_sinal"],
+                    f"Qtd {op['par_a']}": op["qty_a"],
+                    f"Qtd {op['par_b']}": op["qty_b"],
+                    "Capital (R$)":   f"R$ {op['capital_alocado']:,.2f}",
+                })
+            st.dataframe(pd.DataFrame(linhas_dist), use_container_width=True)
+        else:
+            st.info("Nenhuma oportunidade ativa nos pares habilitados no momento.")
+
+    st.markdown("---")
+
+    # ── Log de ordens ──────────────────────────────────────
+    st.markdown("### 📋 Log de Ordens")
+    log = gestor.carregar_log()
+    if not log:
+        st.info("Nenhuma ordem registrada ainda.")
+    else:
+        df_log = pd.DataFrame(reversed(log))
+        cols_show = ["timestamp", "par_a", "par_b", "sinal",
+                     "zscore", "qty_a", "qty_b", "status", "simulacao"]
+        cols_show = [c for c in cols_show if c in df_log.columns]
+        st.dataframe(df_log[cols_show], use_container_width=True, height=300)
+
+        csv_log = df_log.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Exportar log", csv_log, "log_ordens.csv", "text/csv")
+
+
+# ══════════════════════════════════════════════════════════════
+# ABA 6 — HISTÓRICO
+# ══════════════════════════════════════════════════════════════
+with aba6:
     df_hist = analyzer.carregar_historico_df()
     stats   = analyzer.estatisticas_historico()
 

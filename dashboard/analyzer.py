@@ -12,6 +12,7 @@ import os
 
 import mt5_connector as mt5c
 import posicoes as pos
+import config_operacoes as cfg_op
 
 LOOKBACK = 60        # dias para janela móvel de Z-score
 Z_ENTRADA = 2.0      # sinal de oportunidade
@@ -145,14 +146,55 @@ def analisar_todos_pares(pares: list) -> list:
                         quantidade    = 10,  # padrão; usuário pode alterar no painel
                     )
 
-    # Ordena: oportunidades primeiro, depois por |Z|
-    return sorted(
+    # Ordena: oportunidades primeiro, depois por |Z| (maior = melhor)
+    resultados = sorted(
         resultados,
         key=lambda x: (
             0 if x.get("sinal") in ("VENDER_A", "COMPRAR_A") else 1,
             -abs(x.get("zscore_atual") or 0)
         )
     )
+
+    # ── Execução automática ──────────────────────────────────
+    if cfg_op.is_auto_executar():
+        import gestor_ordens as gestor
+
+        simulacao = cfg_op.is_simulacao()
+
+        # Filtra oportunidades com par habilitado e sem posição já aberta
+        abertas_ids = {(p["par_a"], p["par_b"]) for p in pos.listar_abertas()}
+
+        oportunidades_exec = [
+            r for r in resultados
+            if r.get("sinal") in ("VENDER_A", "COMPRAR_A")
+            and cfg_op.is_par_habilitado(r["par_a"], r["par_b"])
+            and (r["par_a"], r["par_b"]) not in abertas_ids
+        ]
+
+        if oportunidades_exec:
+            distribuicao = gestor.calcular_distribuicao(oportunidades_exec)
+            for op in distribuicao:
+                gestor.executar_par(
+                    par_a     = op["par_a"],
+                    par_b     = op["par_b"],
+                    sinal     = op["sinal"],
+                    qty_a     = op["qty_a"],
+                    qty_b     = op["qty_b"],
+                    setor     = op.get("setor", ""),
+                    zscore    = op["zscore_atual"],
+                    preco_a   = op["preco_a"],
+                    preco_b   = op["preco_b"],
+                    simulacao = simulacao,
+                )
+
+        # Fecha automaticamente posições cujo Z voltou ao neutro
+        for r in resultados:
+            if abs(r.get("zscore_atual") or 1) <= Z_SAIDA:
+                for p in pos.listar_abertas():
+                    if p["par_a"] == r["par_a"] and p["par_b"] == r["par_b"]:
+                        gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao)
+
+    return resultados
 
 
 # ── Histórico de oportunidades ───────────────────────────────
