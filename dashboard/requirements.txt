@@ -1,0 +1,7 @@
+MetaTrader5
+streamlit
+streamlit-autorefresh
+pandas
+numpy
+scipy
+plotly
