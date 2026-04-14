@@ -660,7 +660,7 @@ with aba4:
                 return ""
 
         st.dataframe(
-            df_fechadas.style.applymap(cor_pl, subset=["P&L (R$)"]),
+            df_fechadas.style.map(cor_pl, subset=["P&L (R$)"]),
             use_container_width=True,
             height=300,
         )
