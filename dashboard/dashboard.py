@@ -12,6 +12,7 @@ from datetime import datetime
 from pares import PARES
 import mt5_connector as mt5c
 import analyzer
+import posicoes as pos
 
 # ── Configuração ─────────────────────────────────────────────
 st.set_page_config(
@@ -265,10 +266,11 @@ st.markdown("---")
 
 
 # ── Abas ─────────────────────────────────────────────────────
-aba1, aba2, aba3, aba4 = st.tabs([
+aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "🔥  Oportunidades",
     "📈  Gráficos Z-Score",
     "📋  Todos os Pares",
+    "💰  Simulador P&L",
     "📊  Histórico",
 ])
 
@@ -487,9 +489,188 @@ with aba3:
 
 
 # ══════════════════════════════════════════════════════════════
-# ABA 4 — HISTÓRICO
+# ABA 4 — SIMULADOR P&L
 # ══════════════════════════════════════════════════════════════
 with aba4:
+
+    st.markdown("### 💰 Simulador de P&L — Posições Abertas")
+
+    abertas = pos.listar_abertas()
+    fechadas = pos.listar_fechadas()
+    resumo = pos.resumo_fechadas()
+
+    # ── Quantidade global ──────────────────────────────────
+    quantidade = st.number_input(
+        "Quantidade de ações por ponta (A e B):",
+        min_value=1, max_value=10000, value=10, step=1
+    )
+
+    st.markdown("---")
+
+    # ── Posições abertas ───────────────────────────────────
+    if not abertas:
+        st.markdown("""
+        <div style="background:#1a1f35; border:1px solid #2d3250; border-radius:10px;
+                    padding:30px; text-align:center;">
+            <p style="font-size:36px; margin:0;">📭</p>
+            <p style="font-size:16px; color:#fff; margin:10px 0 4px;">Nenhuma posição aberta</p>
+            <p style="font-size:13px; color:#8892b0;">Posições são abertas automaticamente quando Z-score ≥ ±2.0</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        pl_total_aberto = 0.0
+
+        for p in abertas:
+            preco_atual_a = mt5c.buscar_preco_atual(p["par_a"])
+            preco_atual_b = mt5c.buscar_preco_atual(p["par_b"])
+
+            if preco_atual_a is None or preco_atual_b is None:
+                continue
+
+            pl = pos.calcular_pl(p, preco_atual_a, preco_atual_b, quantidade)
+            pl_total_aberto += pl
+
+            pl_cor   = "#00e676" if pl >= 0 else "#ff5252"
+            pl_sinal = "+" if pl >= 0 else ""
+            card_c   = "card-buy" if pl >= 0 else "card-sell"
+
+            var_a = ((preco_atual_a - p["preco_entrada_a"]) / p["preco_entrada_a"]) * 100
+            var_b = ((preco_atual_b - p["preco_entrada_b"]) / p["preco_entrada_b"]) * 100
+
+            col_card, col_fechar = st.columns([5, 1])
+
+            with col_card:
+                st.markdown(f"""
+                <div class="card {card_c}">
+                    <div class="card-header">
+                        <span class="card-title">{p['par_a']} / {p['par_b']}</span>
+                        <span class="card-setor">{p['setor']}</span>
+                        <span style="font-size:26px; font-weight:800; color:{pl_cor};">
+                            {pl_sinal}R$ {pl:.2f}
+                        </span>
+                    </div>
+                    <div class="card-info">
+                        <div class="info-item">
+                            <label>Entrada em</label>
+                            <span>{p['data_entrada']} {p['hora_entrada']}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Z Entrada</label>
+                            <span>{p['zscore_entrada']:+.3f}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Entrada {p['par_a']}</label>
+                            <span>R$ {p['preco_entrada_a']:.2f}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Atual {p['par_a']}</label>
+                            <span>R$ {preco_atual_a:.2f}
+                                <small style="color:{'#00e676' if var_a>=0 else '#ff5252'}">
+                                    ({'+' if var_a>=0 else ''}{var_a:.1f}%)
+                                </small>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <label>Entrada {p['par_b']}</label>
+                            <span>R$ {p['preco_entrada_b']:.2f}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Atual {p['par_b']}</label>
+                            <span>R$ {preco_atual_b:.2f}
+                                <small style="color:{'#00e676' if var_b>=0 else '#ff5252'}">
+                                    ({'+' if var_b>=0 else ''}{var_b:.1f}%)
+                                </small>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <label>Qtd por ponta</label>
+                            <span>{quantidade}</span>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col_fechar:
+                st.markdown("<br><br><br>", unsafe_allow_html=True)
+                if st.button("✅ Fechar", key=f"fechar_{p['id']}"):
+                    # Busca Z-score atual para registrar na saída
+                    dados_par = next(
+                        (r for r in resultados
+                         if r.get("par_a") == p["par_a"] and r.get("par_b") == p["par_b"]),
+                        None
+                    )
+                    z_saida = dados_par["zscore_atual"] if dados_par else 0.0
+                    pos.fechar_posicao(p["id"], preco_atual_a, preco_atual_b, z_saida, quantidade)
+                    st.success("Posição fechada!")
+                    st.cache_data.clear()
+                    st.rerun()
+
+        # ── Resumo das abertas ─────────────────────────────
+        st.markdown("---")
+        pl_cor_total = "#00e676" if pl_total_aberto >= 0 else "#ff5252"
+        st.markdown(f"""
+        <div style="background:#1a1f35; border:1px solid #2d3250; border-radius:10px;
+                    padding:20px 30px; text-align:center;">
+            <p style="color:#8892b0; font-size:13px; margin:0 0 6px;">
+                P&L TOTAL ESTIMADO ({len(abertas)} posição(ões) × {quantidade} ações)
+            </p>
+            <p style="font-size:40px; font-weight:800; color:{pl_cor_total}; margin:0;">
+                {'+'if pl_total_aberto>=0 else ''}R$ {pl_total_aberto:.2f}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Resumo das fechadas ────────────────────────────────
+    if fechadas:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("### 📋 Operações Fechadas")
+
+        if resumo:
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Total de Operações", resumo["total_operacoes"])
+            c2.metric("Vencedoras",         f"{resumo['vencedoras']} ({resumo['taxa_acerto']}%)")
+            c3.metric("P&L Total",          f"R$ {resumo['pl_total']:.2f}")
+            c4.metric("Maior Ganho",        f"R$ {resumo['maior_ganho']:.2f}")
+            c5.metric("Maior Perda",        f"R$ {resumo['maior_perda']:.2f}")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        linhas = []
+        for p in reversed(fechadas):
+            pl = p.get("pl_final", 0) or 0
+            linhas.append({
+                "Par":          f"{p['par_a']} / {p['par_b']}",
+                "Setor":        p["setor"],
+                "Entrada":      f"{p['data_entrada']} {p['hora_entrada']}",
+                "Fechamento":   p.get("data_fechamento", "—"),
+                "Z Entrada":    p["zscore_entrada"],
+                "Z Saída":      p.get("zscore_saida", "—"),
+                "P&L (R$)":     round(pl, 2),
+            })
+
+        df_fechadas = pd.DataFrame(linhas)
+
+        def cor_pl(val):
+            try:
+                return "color: #00e676" if float(val) >= 0 else "color: #ff5252"
+            except Exception:
+                return ""
+
+        st.dataframe(
+            df_fechadas.style.applymap(cor_pl, subset=["P&L (R$)"]),
+            use_container_width=True,
+            height=300,
+        )
+
+        csv = df_fechadas.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Exportar operações fechadas", csv,
+                           "operacoes_fechadas.csv", "text/csv")
+
+
+# ══════════════════════════════════════════════════════════════
+# ABA 5 — HISTÓRICO
+# ══════════════════════════════════════════════════════════════
+with aba5:
     df_hist = analyzer.carregar_historico_df()
     stats   = analyzer.estatisticas_historico()
 

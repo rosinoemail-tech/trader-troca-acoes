@@ -11,6 +11,7 @@ import json
 import os
 
 import mt5_connector as mt5c
+import posicoes as pos
 
 LOOKBACK = 60        # dias para janela móvel de Z-score
 Z_ENTRADA = 2.0      # sinal de oportunidade
@@ -116,9 +117,33 @@ def analisar_todos_pares(pares: list) -> list:
         dados["setor"] = par["setor"]
         resultados.append(dados)
 
-        # Salva no histórico se for oportunidade
+        z_atual = dados["zscore_atual"]
+
+        # Oportunidade detectada → abre posição automaticamente
         if dados["sinal"] in ("VENDER_A", "COMPRAR_A"):
             _salvar_oportunidade(dados)
+            pos.abrir_posicao(
+                par_a   = dados["par_a"],
+                par_b   = dados["par_b"],
+                setor   = par["setor"],
+                sinal   = dados["sinal"],
+                zscore  = z_atual,
+                preco_a = dados["preco_a"],
+                preco_b = dados["preco_b"],
+            )
+
+        # Z voltou ao neutro → fecha posição automaticamente
+        if abs(z_atual) <= Z_SAIDA:
+            abertas = pos.listar_abertas()
+            for p in abertas:
+                if p["par_a"] == dados["par_a"] and p["par_b"] == dados["par_b"]:
+                    pos.fechar_posicao(
+                        pos_id        = p["id"],
+                        preco_saida_a = dados["preco_a"],
+                        preco_saida_b = dados["preco_b"],
+                        zscore_saida  = z_atual,
+                        quantidade    = 10,  # padrão; usuário pode alterar no painel
+                    )
 
     # Ordena: oportunidades primeiro, depois por |Z|
     return sorted(
