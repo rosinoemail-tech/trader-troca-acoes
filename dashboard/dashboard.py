@@ -782,14 +782,33 @@ with aba5:
             emoji_z = dado_par.get("emoji", "⚪") if dado_par else "⚪"
 
             with cols[i % 3]:
-                novo = st.checkbox(
-                    f"{emoji_z} {par['par_a']} / {par['par_b']}  `{z_str}`",
-                    value=habilitado,
-                    key=f"ck_{par['par_a']}_{par['par_b']}"
-                )
-                if novo != habilitado:
-                    cfg_op.set_par_habilitado(par["par_a"], par["par_b"], novo)
-                    st.rerun()
+                col_ck, col_qtd = st.columns([3, 2])
+
+                with col_ck:
+                    novo = st.checkbox(
+                        f"{emoji_z} {par['par_a']} / {par['par_b']}  `{z_str}`",
+                        value=habilitado,
+                        key=f"ck_{par['par_a']}_{par['par_b']}"
+                    )
+                    if novo != habilitado:
+                        cfg_op.set_par_habilitado(par["par_a"], par["par_b"], novo)
+                        st.rerun()
+
+                with col_qtd:
+                    qtd_atual = cfg_op.get_qtd_maxima(par["par_a"], par["par_b"])
+                    nova_qtd = st.number_input(
+                        "Qtd máx",
+                        min_value=0,
+                        max_value=100000,
+                        value=qtd_atual,
+                        step=10,
+                        key=f"qtd_{par['par_a']}_{par['par_b']}",
+                        help="0 = sem limite (usa % do saldo)",
+                        label_visibility="visible",
+                    )
+                    if nova_qtd != qtd_atual:
+                        cfg_op.set_qtd_maxima(par["par_a"], par["par_b"], nova_qtd)
+                        st.rerun()
 
         st.markdown("")
 

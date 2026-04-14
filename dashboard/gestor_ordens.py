@@ -76,7 +76,7 @@ def calcular_quantidade(preco_a: float, preco_b: float,
     return max(qty_a, 1), max(qty_b, 1)
 
 
-def calcular_distribuicao(oportunidades: list) -> list:
+def calcular_distribuicao(oportunidades: list) -> list:  # noqa: E302
     """
     Dado o saldo e % configurado, distribui capital
     igualmente entre os pares habilitados com oportunidade,
@@ -98,11 +98,19 @@ def calcular_distribuicao(oportunidades: list) -> list:
         qty_a, qty_b = calcular_quantidade(
             op["preco_a"], op["preco_b"], capital_por_par
         )
+
+        # Aplica limite máximo configurado (0 = sem limite)
+        qtd_max = cfg.get_qtd_maxima(op["par_a"], op["par_b"])
+        if qtd_max > 0:
+            qty_a = min(qty_a, qtd_max)
+            qty_b = min(qty_b, qtd_max)
+
         custo_estimado = (qty_a * op["preco_a"]) + (qty_b * op["preco_b"])
         resultado.append({
             **op,
             "qty_a":           qty_a,
             "qty_b":           qty_b,
+            "qtd_max":         qtd_max,
             "capital_alocado": round(custo_estimado, 2),
         })
 
