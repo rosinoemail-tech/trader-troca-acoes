@@ -131,10 +131,11 @@ st.markdown("""
     }
     .info-item label {
         font-size: 11px;
-        color: #8892b0;
+        color: #aab4c8;
         text-transform: uppercase;
         letter-spacing: 0.8px;
         display: block;
+        font-weight: 500;
     }
     .info-item span {
         font-size: 18px;
@@ -143,6 +144,20 @@ st.markdown("""
     }
     .z-buy  { color: #00e676 !important; }
     .z-sell { color: #ff5252 !important; }
+
+    /* Forçar texto branco em todos os elementos dentro dos cards */
+    .card p, .card div, .card span:not([class*="badge"]):not(.card-setor):not(.card-title) {
+        color: #ffffff;
+    }
+    /* Labels e textos secundários do Streamlit mais brilhantes */
+    .stCheckbox label, .stNumberInput label,
+    div[data-testid="stWidgetLabel"] p,
+    div[data-testid="stCaptionContainer"] p {
+        color: #d0d8e8 !important;
+        font-weight: 500 !important;
+    }
+    /* Seção de setor (títulos h4) */
+    h4 { color: #e0e8f8 !important; }
 
     /* Tabela */
     .tabela-linha {
@@ -802,6 +817,52 @@ with aba5:
         </div>
         """, unsafe_allow_html=True)
 
+    # ── Horário de operação ────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### 🕐 Horário de Operação")
+    st.caption("Fora desse intervalo o robô NÃO envia ordens reais ao MT5.")
+
+    col_h1, col_h2, col_h3 = st.columns([1, 1, 3])
+    with col_h1:
+        h_ini_cfg = cfg_op.get_horario_inicio()
+        h_ini_val = datetime.strptime(h_ini_cfg, "%H:%M").time()
+        h_ini_new = st.time_input("Início", value=h_ini_val, key="h_inicio", step=300)
+        h_ini_str = h_ini_new.strftime("%H:%M")
+        if h_ini_str != h_ini_cfg:
+            cfg_op.set_horario_inicio(h_ini_str)
+            st.rerun()
+
+    with col_h2:
+        h_fim_cfg = cfg_op.get_horario_fim()
+        h_fim_val = datetime.strptime(h_fim_cfg, "%H:%M").time()
+        h_fim_new = st.time_input("Fim", value=h_fim_val, key="h_fim", step=300)
+        h_fim_str = h_fim_new.strftime("%H:%M")
+        if h_fim_str != h_fim_cfg:
+            cfg_op.set_horario_fim(h_fim_str)
+            st.rerun()
+
+    with col_h3:
+        agora_t = datetime.now().time()
+        h_ini_t = datetime.strptime(cfg_op.get_horario_inicio(), "%H:%M").time()
+        h_fim_t = datetime.strptime(cfg_op.get_horario_fim(), "%H:%M").time()
+        mercado_ok = h_ini_t <= agora_t <= h_fim_t
+        cor_status = "#00e676" if mercado_ok else "#ff5252"
+        status_txt = f"🟢 Dentro do horário ({agora_t.strftime('%H:%M')})" if mercado_ok \
+                     else f"🔴 Fora do horário ({agora_t.strftime('%H:%M')})"
+        st.markdown(f"""
+        <div style="background:#1a1f35; border:1px solid #2d3250; border-radius:10px;
+                    padding:14px 20px; margin-top:28px;">
+            <div style="font-size:11px; color:#aab4c8; text-transform:uppercase;
+                        letter-spacing:1px; margin-bottom:4px;">Status atual</div>
+            <div style="font-size:20px; font-weight:700; color:{cor_status};">{status_txt}</div>
+            <div style="font-size:12px; color:#aab4c8; margin-top:2px;">
+                Janela: {cfg_op.get_horario_inicio()} → {cfg_op.get_horario_fim()}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
     if auto and not simulacao:
         st.error("⚠️ **ATENÇÃO: Execução Automática REAL ativada.** "
                  "O sistema enviará ordens reais ao MT5 quando detectar oportunidades nos pares habilitados.")
@@ -833,7 +894,12 @@ with aba5:
     pares_habilitados_count = 0
 
     for setor, pares_setor in setores.items():
-        st.markdown(f"#### {setor}")
+        st.markdown(
+            f'<div style="font-size:18px; font-weight:700; color:#e0e8f8; '
+            f'border-left:3px solid #4a6fa5; padding-left:10px; margin:16px 0 8px;">'
+            f'{setor}</div>',
+            unsafe_allow_html=True
+        )
 
         for par in pares_setor:
             habilitado = config_atual["pares_habilitados"].get(
@@ -934,13 +1000,17 @@ with aba5:
 
                 if qtd_atual > 0 and preco_a and preco_b:
                     custo = (qtd_atual * preco_a) + (qtd_atual * preco_b)
-                    st.caption(f"Custo est.: R$ {custo:,.2f}")
+                    st.markdown(
+                        f'<div style="font-size:12px; color:#aab4c8; margin-top:4px;">'
+                        f'💰 Custo est.: <b style="color:#ffd600;">R$ {custo:,.2f}</b></div>',
+                        unsafe_allow_html=True
+                    )
 
         st.markdown("")
 
     # Preview da distribuição de capital
-    if pares_habilitados_count > 0 and conta:
-        capital_total = conta["margem_livre"] * (pct / 100)
+    if pares_habilitados_count > 0 and saldo_efetivo > 0:
+        capital_total = saldo_efetivo * (pct / 100)
         capital_por_par = capital_total / pares_habilitados_count
 
         st.markdown("---")

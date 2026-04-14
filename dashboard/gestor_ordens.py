@@ -17,16 +17,28 @@ logger = logging.getLogger(__name__)
 MAGIC = 234001          # identificador das ordens deste sistema
 LOG_FILE = "log_ordens.json"
 
-# Horário de funcionamento da B3
-MERCADO_ABRE  = dtime(10, 0)
-MERCADO_FECHA = dtime(17, 55)
+# Horário padrão B3 (sobreposto pelos horários configurados no painel)
+_MERCADO_ABRE_PADRAO  = dtime(10, 0)
+_MERCADO_FECHA_PADRAO = dtime(17, 55)
 
 
 # ── Mercado aberto? ──────────────────────────────────────────
 
 def mercado_aberto() -> bool:
+    """Verifica se está dentro do horário de operação configurado no painel."""
+    try:
+        h_ini = cfg.get_horario_inicio()   # "HH:MM"
+        h_fim = cfg.get_horario_fim()
+        hi, mi = map(int, h_ini.split(":"))
+        hf, mf = map(int, h_fim.split(":"))
+        abre  = dtime(hi, mi)
+        fecha = dtime(hf, mf)
+    except Exception:
+        abre  = _MERCADO_ABRE_PADRAO
+        fecha = _MERCADO_FECHA_PADRAO
+
     agora = datetime.now().time()
-    return MERCADO_ABRE <= agora <= MERCADO_FECHA
+    return abre <= agora <= fecha
 
 
 # ── Saldo da conta ───────────────────────────────────────────

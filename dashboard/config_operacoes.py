@@ -12,6 +12,8 @@ DEFAULTS = {
     "modo_simulacao":     True,    # True = não executa ordens reais
     "percentual_capital": 30,      # % do saldo para operar
     "capital_manual":     0.0,     # 0 = usar saldo do MT5; > 0 = usar este valor
+    "horario_inicio":     "10:00", # horário de início das operações
+    "horario_fim":        "17:55", # horário de encerramento das operações
     "pares_habilitados":  {},      # { "PETR3F_PETR4F": True, ... }
     "qtd_maxima":         {},      # { "PETR3F_PETR4F": 100, ... }  0 = sem limite
 }
@@ -62,6 +64,12 @@ def is_par_habilitado(par_a: str, par_b: str) -> bool:
 def get_capital_manual() -> float:
     return float(_carregar().get("capital_manual", 0.0))
 
+def get_horario_inicio() -> str:
+    return _carregar().get("horario_inicio", "10:00")
+
+def get_horario_fim() -> str:
+    return _carregar().get("horario_fim", "17:55")
+
 def get_qtd_maxima(par_a: str, par_b: str) -> int:
     """Retorna qtd máxima configurada. 0 = sem limite (usa cálculo pelo saldo)."""
     cfg = _carregar()
@@ -88,6 +96,16 @@ def set_percentual(valor: float):
 def set_par_habilitado(par_a: str, par_b: str, habilitado: bool):
     cfg = _carregar()
     cfg["pares_habilitados"][_chave(par_a, par_b)] = habilitado
+    _salvar(cfg)
+
+def set_horario_inicio(hora: str):
+    cfg = _carregar()
+    cfg["horario_inicio"] = hora
+    _salvar(cfg)
+
+def set_horario_fim(hora: str):
+    cfg = _carregar()
+    cfg["horario_fim"] = hora
     _salvar(cfg)
 
 def set_capital_manual(valor: float):
