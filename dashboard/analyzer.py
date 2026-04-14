@@ -120,18 +120,10 @@ def analisar_todos_pares(pares: list) -> list:
 
         z_atual = dados["zscore_atual"]
 
-        # Oportunidade detectada → abre posição automaticamente
+        # Oportunidade detectada → salva no histórico
+        # (pos.abrir_posicao é chamado pelo gestor.executar_par ao executar)
         if dados["sinal"] in ("VENDER_A", "COMPRAR_A"):
             _salvar_oportunidade(dados)
-            pos.abrir_posicao(
-                par_a   = dados["par_a"],
-                par_b   = dados["par_b"],
-                setor   = par["setor"],
-                sinal   = dados["sinal"],
-                zscore  = z_atual,
-                preco_a = dados["preco_a"],
-                preco_b = dados["preco_b"],
-            )
 
         # Z voltou ao neutro → fecha posição automaticamente
         if abs(z_atual) <= Z_SAIDA:

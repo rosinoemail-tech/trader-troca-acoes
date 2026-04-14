@@ -521,6 +521,16 @@ with aba4:
 
     st.markdown("### 💰 Simulador de P&L — Posições Abertas")
 
+    col_pl_btn, _ = st.columns([2, 5])
+    with col_pl_btn:
+        if st.button("🗑️ Limpar posições fantasmas",
+                     help="Remove posições registradas no painel que não existem no MT5 "
+                          "(causadas por bug anterior — use se a posição não aparecer no MT5)"):
+            sync_result = gestor.sincronizar_posicoes_mt5(PARES)
+            st.success(f"Limpeza concluída. {sync_result['fechamentos']} posição(ões) removida(s).")
+            st.cache_data.clear()
+            st.rerun()
+
     abertas = pos.listar_abertas()
     fechadas = pos.listar_fechadas()
     resumo = pos.resumo_fechadas()
