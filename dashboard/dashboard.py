@@ -762,53 +762,108 @@ with aba5:
     pares_habilitados_count = 0
 
     for setor, pares_setor in setores.items():
-        st.markdown(f"**{setor}**")
-        cols = st.columns(min(len(pares_setor), 3))
+        st.markdown(f"#### {setor}")
 
-        for i, par in enumerate(pares_setor):
+        for par in pares_setor:
             habilitado = config_atual["pares_habilitados"].get(
                 f"{par['par_a']}_{par['par_b']}", False
             )
             if habilitado:
                 pares_habilitados_count += 1
 
-            # Busca Z-score atual
-            dado_par = next(
+            # Dados do par nos resultados atuais
+            d = next(
                 (r for r in resultados
                  if r.get("par_a") == par["par_a"] and r.get("par_b") == par["par_b"]),
                 None
             )
-            z_str = f"Z: {dado_par['zscore_atual']:+.2f}" if dado_par and dado_par.get("zscore_atual") else "Z: —"
-            emoji_z = dado_par.get("emoji", "⚪") if dado_par else "⚪"
 
-            with cols[i % 3]:
-                col_ck, col_qtd = st.columns([3, 2])
+            z         = d["zscore_atual"] if d and d.get("zscore_atual") is not None else None
+            sinal     = d.get("sinal", "NEUTRO") if d else "NEUTRO"
+            emoji_z   = d.get("emoji", "⚪") if d else "⚪"
+            preco_a   = d.get("preco_a") if d else None
+            preco_b   = d.get("preco_b") if d else None
+            beta      = d.get("beta") if d else None
+            corr      = d.get("correlacao") if d else None
+            texto_sin = d.get("texto_sinal", "—") if d else "—"
 
-                with col_ck:
-                    novo = st.checkbox(
-                        f"{emoji_z} {par['par_a']} / {par['par_b']}  `{z_str}`",
-                        value=habilitado,
-                        key=f"ck_{par['par_a']}_{par['par_b']}"
-                    )
-                    if novo != habilitado:
-                        cfg_op.set_par_habilitado(par["par_a"], par["par_b"], novo)
-                        st.rerun()
+            # Cor do card baseada no estado
+            if sinal == "COMPRAR_A":
+                card_c = "card-buy"
+            elif sinal == "VENDER_A":
+                card_c = "card-sell"
+            elif habilitado:
+                card_c = "card-watch"
+            else:
+                card_c = "card-neutral"
 
-                with col_qtd:
-                    qtd_atual = cfg_op.get_qtd_maxima(par["par_a"], par["par_b"])
-                    nova_qtd = st.number_input(
-                        "Qtd máx",
-                        min_value=0,
-                        max_value=100000,
-                        value=qtd_atual,
-                        step=10,
-                        key=f"qtd_{par['par_a']}_{par['par_b']}",
-                        help="0 = sem limite (usa % do saldo)",
-                        label_visibility="visible",
-                    )
-                    if nova_qtd != qtd_atual:
-                        cfg_op.set_qtd_maxima(par["par_a"], par["par_b"], nova_qtd)
-                        st.rerun()
+            # Cor do Z-score
+            z_cor = "#00e676" if (z or 0) < 0 else "#ff5252" if (z or 0) > 0 else "#8892b0"
+            z_str = f"{z:+.4f}" if z is not None else "—"
+
+            col_card, col_controls = st.columns([5, 2])
+
+            with col_card:
+                st.markdown(f"""
+                <div class="card {card_c}">
+                    <div class="card-header">
+                        <span class="card-title">{emoji_z} {par['par_a']} / {par['par_b']}</span>
+                        <span class="card-setor">{par['setor']}</span>
+                        <span style="font-size:22px; font-weight:800; color:{z_cor};">Z {z_str}</span>
+                    </div>
+                    <div class="card-info">
+                        <div class="info-item">
+                            <label>Sinal</label>
+                            <span style="font-size:14px;">{texto_sin}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Preço {par['par_a']}</label>
+                            <span>{"R$ " + f"{preco_a:.2f}" if preco_a else "—"}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Preço {par['par_b']}</label>
+                            <span>{"R$ " + f"{preco_b:.2f}" if preco_b else "—"}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Beta (β)</label>
+                            <span>{f"{beta:.4f}" if beta else "—"}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Correlação</label>
+                            <span>{f"{corr:.4f}" if corr else "—"}</span>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col_controls:
+                st.markdown("<br>", unsafe_allow_html=True)
+                novo = st.checkbox(
+                    "✅ Habilitado" if habilitado else "❌ Desabilitado",
+                    value=habilitado,
+                    key=f"ck_{par['par_a']}_{par['par_b']}"
+                )
+                if novo != habilitado:
+                    cfg_op.set_par_habilitado(par["par_a"], par["par_b"], novo)
+                    st.rerun()
+
+                qtd_atual = cfg_op.get_qtd_maxima(par["par_a"], par["par_b"])
+                nova_qtd = st.number_input(
+                    "Qtd máx por ponta",
+                    min_value=0,
+                    max_value=100000,
+                    value=qtd_atual,
+                    step=10,
+                    key=f"qtd_{par['par_a']}_{par['par_b']}",
+                    help="0 = sem limite (calcula pelo % do saldo)",
+                )
+                if nova_qtd != qtd_atual:
+                    cfg_op.set_qtd_maxima(par["par_a"], par["par_b"], nova_qtd)
+                    st.rerun()
+
+                if qtd_atual > 0 and preco_a and preco_b:
+                    custo = (qtd_atual * preco_a) + (qtd_atual * preco_b)
+                    st.caption(f"Custo est.: R$ {custo:,.2f}")
 
         st.markdown("")
 
