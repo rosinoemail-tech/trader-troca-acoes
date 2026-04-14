@@ -258,6 +258,132 @@ def fechar_par_mt5(par_a: str, par_b: str, simulacao: bool = True) -> dict:
     return resultados
 
 
+# ── Sincronização com MT5 ────────────────────────────────────
+
+def sincronizar_posicoes_mt5(pares: list) -> dict:
+    """
+    Sincroniza posicoes.json com as posições reais abertas no MT5.
+
+    1. Posição aberta no MT5 mas NÃO no JSON  → importa automaticamente
+    2. Posição aberta no JSON mas SEM as duas pernas no MT5 → marca como fechada
+
+    Funciona com posições manuais e do robô (qualquer magic number).
+    Retorna dict: { "novos_registros": int, "fechamentos": int }
+    """
+    # Coleta todos os símbolos dos pares conhecidos
+    todos_simbolos = set()
+    for par in pares:
+        todos_simbolos.add(par["par_a"])
+        todos_simbolos.add(par["par_b"])
+
+    # Busca posições abertas no MT5, agrupadas por símbolo
+    mt5_por_simbolo: dict = {}
+    for symbol in todos_simbolos:
+        positions = mt5.positions_get(symbol=symbol)
+        if positions:
+            mt5_por_simbolo[symbol] = list(positions)
+
+    abertas_json = pos.listar_abertas()
+    pares_ja_abertos = {(p["par_a"], p["par_b"]) for p in abertas_json}
+
+    novos    = 0
+    fechados = 0
+
+    # ── 1. Importar pares do MT5 ainda não no JSON ────────────
+    for par in pares:
+        par_a = par["par_a"]
+        par_b = par["par_b"]
+
+        if (par_a, par_b) in pares_ja_abertos:
+            continue  # já rastreado, ignora
+
+        lista_a = mt5_por_simbolo.get(par_a, [])
+        lista_b = mt5_por_simbolo.get(par_b, [])
+
+        if not lista_a or not lista_b:
+            continue  # não há pernas complementares abertas
+
+        # Procura combinações que formam um par
+        buy_a  = next((p for p in lista_a if p.type == mt5.POSITION_TYPE_BUY),  None)
+        sell_a = next((p for p in lista_a if p.type == mt5.POSITION_TYPE_SELL), None)
+        buy_b  = next((p for p in lista_b if p.type == mt5.POSITION_TYPE_BUY),  None)
+        sell_b = next((p for p in lista_b if p.type == mt5.POSITION_TYPE_SELL), None)
+
+        sinal       = None
+        preco_a_ent = None
+        preco_b_ent = None
+        qty         = None
+
+        # COMPRAR_A: BUY par_a + SELL par_b
+        if buy_a and sell_b:
+            sinal       = "COMPRAR_A"
+            preco_a_ent = buy_a.price_open
+            preco_b_ent = sell_b.price_open
+            qty         = int(min(buy_a.volume, sell_b.volume))
+
+        # VENDER_A: SELL par_a + BUY par_b
+        elif sell_a and buy_b:
+            sinal       = "VENDER_A"
+            preco_a_ent = sell_a.price_open
+            preco_b_ent = buy_b.price_open
+            qty         = int(min(sell_a.volume, buy_b.volume))
+
+        if sinal:
+            pos.abrir_posicao(
+                par_a     = par_a,
+                par_b     = par_b,
+                setor     = par["setor"],
+                sinal     = sinal,
+                zscore    = 0.0,       # desconhecido para posições manuais
+                preco_a   = preco_a_ent,
+                preco_b   = preco_b_ent,
+                quantidade = qty,
+                origem    = "manual",
+            )
+            logger.info(f"[SYNC MT5] Importada: {par_a}/{par_b} {sinal} "
+                        f"preco_a={preco_a_ent} preco_b={preco_b_ent} qty={qty}")
+            novos += 1
+
+    # ── 2. Detectar posições fechadas no MT5 ─────────────────
+    for p in abertas_json:
+        par_a = p["par_a"]
+        par_b = p["par_b"]
+        sinal = p["sinal"]
+
+        lista_a = mt5_por_simbolo.get(par_a, [])
+        lista_b = mt5_por_simbolo.get(par_b, [])
+
+        # Verifica se as pernas do par ainda existem no MT5
+        if sinal == "COMPRAR_A":
+            perna_a_existe = any(x.type == mt5.POSITION_TYPE_BUY  for x in lista_a)
+            perna_b_existe = any(x.type == mt5.POSITION_TYPE_SELL for x in lista_b)
+        else:  # VENDER_A
+            perna_a_existe = any(x.type == mt5.POSITION_TYPE_SELL for x in lista_a)
+            perna_b_existe = any(x.type == mt5.POSITION_TYPE_BUY  for x in lista_b)
+
+        if perna_a_existe or perna_b_existe:
+            continue  # ao menos uma perna ainda aberta, mantém
+
+        # Ambas as pernas foram fechadas → encerra no JSON
+        tick_a   = mt5.symbol_info_tick(par_a)
+        tick_b   = mt5.symbol_info_tick(par_b)
+        preco_a  = (tick_a.last  or tick_a.bid)  if tick_a  else p["preco_entrada_a"]
+        preco_b  = (tick_b.last  or tick_b.bid)  if tick_b  else p["preco_entrada_b"]
+        qty_real = p.get("quantidade_mt5") or 1
+
+        pos.fechar_posicao(
+            pos_id        = p["id"],
+            preco_saida_a = preco_a,
+            preco_saida_b = preco_b,
+            zscore_saida  = 0.0,
+            quantidade    = qty_real,
+        )
+        logger.info(f"[SYNC MT5] Fechamento detectado: {par_a}/{par_b}")
+        fechados += 1
+
+    return {"novos_registros": novos, "fechamentos": fechados}
+
+
 # ── Log de ordens ────────────────────────────────────────────
 
 def _registrar_log(entrada: dict):

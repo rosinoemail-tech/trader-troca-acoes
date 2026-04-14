@@ -200,6 +200,14 @@ if not mt5_ok:
     st.stop()
 
 
+# ── Sincroniza posições com MT5 ──────────────────────────────
+_sync = gestor.sincronizar_posicoes_mt5(PARES)
+if _sync["novos_registros"] > 0:
+    st.toast(f"🔄 {_sync['novos_registros']} posição(ões) importada(s) do MT5", icon="📥")
+if _sync["fechamentos"] > 0:
+    st.toast(f"✅ {_sync['fechamentos']} posição(ões) fechada(s) detectada(s) no MT5", icon="📤")
+
+
 # ── Carrega dados ────────────────────────────────────────────
 @st.cache_data(ttl=60)
 def carregar_analise():
@@ -530,7 +538,9 @@ with aba4:
             if preco_atual_a is None or preco_atual_b is None:
                 continue
 
-            pl = pos.calcular_pl(p, preco_atual_a, preco_atual_b, quantidade)
+            # Usa qtd real do MT5 para posições importadas, senão usa o campo global
+            qty_real = p.get("quantidade_mt5") or quantidade
+            pl = pos.calcular_pl(p, preco_atual_a, preco_atual_b, qty_real)
             pl_total_aberto += pl
 
             pl_cor   = "#00e676" if pl >= 0 else "#ff5252"
@@ -540,6 +550,15 @@ with aba4:
             var_a = ((preco_atual_a - p["preco_entrada_a"]) / p["preco_entrada_a"]) * 100
             var_b = ((preco_atual_b - p["preco_entrada_b"]) / p["preco_entrada_b"]) * 100
 
+            origem_badge = (
+                '<span style="background:#1e3a5f; color:#64b5f6; font-size:11px; '
+                'padding:2px 8px; border-radius:10px; font-weight:600;">📥 Importado MT5</span>'
+                if p.get("origem") == "manual"
+                else
+                '<span style="background:#1a2e1a; color:#81c784; font-size:11px; '
+                'padding:2px 8px; border-radius:10px; font-weight:600;">🤖 Robô</span>'
+            )
+
             col_card, col_fechar = st.columns([5, 1])
 
             with col_card:
@@ -548,6 +567,7 @@ with aba4:
                     <div class="card-header">
                         <span class="card-title">{p['par_a']} / {p['par_b']}</span>
                         <span class="card-setor">{p['setor']}</span>
+                        {origem_badge}
                         <span style="font-size:26px; font-weight:800; color:{pl_cor};">
                             {pl_sinal}R$ {pl:.2f}
                         </span>
@@ -587,7 +607,7 @@ with aba4:
                         </div>
                         <div class="info-item">
                             <label>Qtd por ponta</label>
-                            <span>{quantidade}</span>
+                            <span>{qty_real}</span>
                         </div>
                     </div>
                 </div>
