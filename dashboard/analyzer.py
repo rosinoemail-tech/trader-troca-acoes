@@ -15,11 +15,14 @@ import posicoes as pos
 import config_operacoes as cfg_op
 
 LOOKBACK = 60        # dias para janela móvel de Z-score
-Z_ENTRADA = 2.0      # sinal de oportunidade
-Z_SAIDA = 0.5        # sinal de fechamento
-Z_STOP = 3.5         # stop loss extremo
 
-HISTORICO_FILE = "historico_oportunidades.json"
+# Valores lidos dinamicamente do config (editável pelo painel)
+def _z_entrada() -> float: return cfg_op.get_z_entrada()
+def _z_saida()   -> float: return cfg_op.get_z_saida()
+def _z_stop()    -> float: return cfg_op.get_z_stop()
+
+_DIR = os.path.dirname(os.path.abspath(__file__))
+HISTORICO_FILE = os.path.join(_DIR, "historico_oportunidades.json")
 
 
 # ── Cálculo principal ────────────────────────────────────────
@@ -53,15 +56,18 @@ def calcular_zscore_par(par_a: str, par_b: str, n_barras: int = 500) -> Optional
     zscore_atual = zscore.iloc[-1]
 
     # Sinal e direção
-    if zscore_atual > Z_ENTRADA:
+    z_ent = _z_entrada()
+    z_sai = _z_saida()
+
+    if zscore_atual > z_ent:
         sinal   = "VENDER_A"
         emoji   = "🔴"
         texto   = f"VENDER {par_a} / COMPRAR {par_b}"
-    elif zscore_atual < -Z_ENTRADA:
+    elif zscore_atual < -z_ent:
         sinal   = "COMPRAR_A"
         emoji   = "🟢"
         texto   = f"COMPRAR {par_a} / VENDER {par_b}"
-    elif abs(zscore_atual) > Z_SAIDA:
+    elif abs(zscore_atual) > z_sai:
         sinal   = "MONITORANDO"
         emoji   = "🟡"
         texto   = "Aguardando sinal"
@@ -126,7 +132,7 @@ def analisar_todos_pares(pares: list) -> list:
             _salvar_oportunidade(dados)
 
         # Z voltou ao neutro → fecha posição automaticamente
-        if abs(z_atual) <= Z_SAIDA:
+        if abs(z_atual) <= _z_saida():
             abertas = pos.listar_abertas()
             for p in abertas:
                 if p["par_a"] == dados["par_a"] and p["par_b"] == dados["par_b"]:
@@ -147,46 +153,72 @@ def analisar_todos_pares(pares: list) -> list:
         )
     )
 
-    # ── Execução automática ──────────────────────────────────
-    if cfg_op.is_auto_executar():
-        import gestor_ordens as gestor
-
-        simulacao = cfg_op.is_simulacao()
-
-        # Filtra oportunidades com par habilitado e sem posição já aberta
-        abertas_ids = {(p["par_a"], p["par_b"]) for p in pos.listar_abertas()}
-
-        oportunidades_exec = [
-            r for r in resultados
-            if r.get("sinal") in ("VENDER_A", "COMPRAR_A")
-            and cfg_op.is_par_habilitado(r["par_a"], r["par_b"])
-            and (r["par_a"], r["par_b"]) not in abertas_ids
-        ]
-
-        if oportunidades_exec:
-            distribuicao = gestor.calcular_distribuicao(oportunidades_exec)
-            for op in distribuicao:
-                gestor.executar_par(
-                    par_a     = op["par_a"],
-                    par_b     = op["par_b"],
-                    sinal     = op["sinal"],
-                    qty_a     = op["qty_a"],
-                    qty_b     = op["qty_b"],
-                    setor     = op.get("setor", ""),
-                    zscore    = op["zscore_atual"],
-                    preco_a   = op["preco_a"],
-                    preco_b   = op["preco_b"],
-                    simulacao = simulacao,
-                )
-
-        # Fecha automaticamente posições cujo Z voltou ao neutro
-        for r in resultados:
-            if abs(r.get("zscore_atual") or 1) <= Z_SAIDA:
-                for p in pos.listar_abertas():
-                    if p["par_a"] == r["par_a"] and p["par_b"] == r["par_b"]:
-                        gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao)
-
     return resultados
+
+
+def executar_ciclo(resultados: list):
+    """
+    Executa ordens com base nos resultados de análise.
+    DEVE ser chamada fora de qualquer cache — roda a cada ciclo do painel.
+    """
+    import logging
+    _log = logging.getLogger("analyzer")
+
+    if not cfg_op.is_auto_executar():
+        _log.warning("[EXEC] Execução automática DESLIGADA — ative na aba Gestão do painel.")
+        return
+
+    import gestor_ordens as gestor
+
+    simulacao = cfg_op.is_simulacao()
+    if simulacao:
+        _log.warning("[EXEC] Modo SIMULAÇÃO ativo — ordens calculadas mas NÃO enviadas ao MT5. "
+                     "Desative 'Modo Simulação' na aba Gestão para operar de verdade.")
+
+    # Filtra oportunidades com par habilitado e sem posição já aberta
+    abertas_ids = {(p["par_a"], p["par_b"]) for p in pos.listar_abertas()}
+
+    oportunidades_exec = []
+    for r in resultados:
+        if r.get("sinal") not in ("VENDER_A", "COMPRAR_A"):
+            continue
+        par_key = f"{r['par_a']}/{r['par_b']}"
+        if not cfg_op.is_par_habilitado(r["par_a"], r["par_b"]):
+            _log.info(f"[EXEC] {par_key} — par não habilitado, pulando.")
+            continue
+        if (r["par_a"], r["par_b"]) in abertas_ids:
+            _log.info(f"[EXEC] {par_key} — posição já aberta, pulando.")
+            continue
+        oportunidades_exec.append(r)
+
+    if oportunidades_exec:
+        distribuicao = gestor.calcular_distribuicao(oportunidades_exec)
+        for op in distribuicao:
+            _log.info(f"[EXEC] Enviando ordem: {op['par_a']}/{op['par_b']} "
+                      f"sinal={op['sinal']} qty_a={op['qty_a']} qty_b={op['qty_b']} "
+                      f"simulacao={simulacao}")
+            gestor.executar_par(
+                par_a     = op["par_a"],
+                par_b     = op["par_b"],
+                sinal     = op["sinal"],
+                qty_a     = op["qty_a"],
+                qty_b     = op["qty_b"],
+                setor     = op.get("setor", ""),
+                zscore    = op["zscore_atual"],
+                preco_a   = op["preco_a"],
+                preco_b   = op["preco_b"],
+                simulacao = simulacao,
+            )
+    else:
+        if not simulacao:
+            _log.info("[EXEC] Nenhuma oportunidade com par habilitado e sem posição aberta.")
+
+    # Fecha automaticamente posições cujo Z voltou ao neutro
+    for r in resultados:
+        if abs(r.get("zscore_atual") or 1) <= _z_saida():
+            for p in pos.listar_abertas():
+                if p["par_a"] == r["par_a"] and p["par_b"] == r["par_b"]:
+                    gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao)
 
 
 # ── Histórico de oportunidades ───────────────────────────────

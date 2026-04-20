@@ -5,7 +5,9 @@
 import json
 import os
 
-CONFIG_FILE = "config_operacoes.json"
+# Caminho absoluto baseado na localização deste arquivo,
+# independente do diretório de trabalho atual
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config_operacoes.json")
 
 DEFAULTS = {
     "auto_executar":      False,   # ligado/desligado pelo painel
@@ -16,6 +18,9 @@ DEFAULTS = {
     "horario_fim":        "17:55", # horário de encerramento das operações
     "pares_habilitados":  {},      # { "PETR3F_PETR4F": True, ... }
     "qtd_maxima":         {},      # { "PETR3F_PETR4F": 100, ... }  0 = sem limite
+    "z_entrada":          2.0,     # Z-score para abrir posição
+    "z_saida":            0.5,     # Z-score para fechar posição (convergência)
+    "z_stop":             3.5,     # Z-score para stop loss
 }
 
 
@@ -75,6 +80,15 @@ def get_qtd_maxima(par_a: str, par_b: str) -> int:
     cfg = _carregar()
     return int(cfg.get("qtd_maxima", {}).get(_chave(par_a, par_b), 0))
 
+def get_z_entrada() -> float:
+    return float(_carregar().get("z_entrada", 2.0))
+
+def get_z_saida() -> float:
+    return float(_carregar().get("z_saida", 0.5))
+
+def get_z_stop() -> float:
+    return float(_carregar().get("z_stop", 3.5))
+
 
 # ── Escrita ──────────────────────────────────────────────────
 
@@ -111,6 +125,21 @@ def set_horario_fim(hora: str):
 def set_capital_manual(valor: float):
     cfg = _carregar()
     cfg["capital_manual"] = max(0.0, float(valor))
+    _salvar(cfg)
+
+def set_z_entrada(valor: float):
+    cfg = _carregar()
+    cfg["z_entrada"] = round(max(0.5, min(5.0, float(valor))), 2)
+    _salvar(cfg)
+
+def set_z_saida(valor: float):
+    cfg = _carregar()
+    cfg["z_saida"] = round(max(0.1, min(2.0, float(valor))), 2)
+    _salvar(cfg)
+
+def set_z_stop(valor: float):
+    cfg = _carregar()
+    cfg["z_stop"] = round(max(2.0, min(6.0, float(valor))), 2)
     _salvar(cfg)
 
 def set_qtd_maxima(par_a: str, par_b: str, qtd: int):

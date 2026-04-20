@@ -226,7 +226,7 @@ if _sync["fechamentos"] > 0:
 # ── Carrega dados ────────────────────────────────────────────
 import json as _json
 
-ROBOT_STATUS_FILE = "robot_status.json"
+ROBOT_STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "robot_status.json")
 
 def _salvar_status_robo(n_opor: int, n_exec: int):
     try:
@@ -246,15 +246,24 @@ def _ler_status_robo() -> dict:
 
 @st.cache_data(ttl=60)
 def carregar_analise():
-    res = analyzer.analisar_todos_pares(PARES)
-    n_opor = sum(1 for r in res if r.get("sinal") in ("VENDER_A", "COMPRAR_A"))
-    log    = gestor.carregar_log()
-    n_exec = len([l for l in log if l.get("timestamp","")[:10] == datetime.now().strftime("%d/%m/%Y")])
-    _salvar_status_robo(n_opor, n_exec)
-    return res
+    """Apenas análise — cacheada por 60s. Sem efeitos colaterais."""
+    return analyzer.analisar_todos_pares(PARES)
 
 with st.spinner("Calculando Z-scores..."):
     resultados = carregar_analise()
+
+# Execução de ordens: SEMPRE roda a cada ciclo, nunca cacheada
+analyzer.executar_ciclo(resultados)
+
+# Atualiza contadores do status do robô
+n_opor = sum(1 for r in resultados if r.get("sinal") in ("VENDER_A", "COMPRAR_A"))
+log    = gestor.carregar_log()
+hoje   = datetime.now().strftime("%d/%m/%Y")
+# Conta apenas ordens realmente executadas no MT5 (não simuladas, não com erro)
+n_exec = len([l for l in log
+              if l.get("timestamp", "")[:10] == hoje
+              and l.get("status") == "executado"])
+_salvar_status_robo(n_opor, n_exec)
 
 if not resultados:
     st.warning("Carregando dados...")
@@ -517,10 +526,10 @@ with aba2:
             ))
             # Linhas de referência
             for val, cor, nome in [
-                ( analyzer.Z_ENTRADA,  "#ff5252", "Vender"),
-                (-analyzer.Z_ENTRADA,  "#00c853", "Comprar"),
-                ( analyzer.Z_SAIDA,    "#555",    ""),
-                (-analyzer.Z_SAIDA,    "#555",    ""),
+                ( cfg_op.get_z_entrada(),  "#ff5252", "Vender"),
+                (-cfg_op.get_z_entrada(),  "#00c853", "Comprar"),
+                ( cfg_op.get_z_saida(),    "#555",    ""),
+                (-cfg_op.get_z_saida(),    "#555",    ""),
             ]:
                 fig_z.add_hline(
                     y=val, line_dash="dash", line_color=cor, line_width=1.5,
@@ -870,6 +879,79 @@ with aba5:
         )
         if pct != config_atual.get("percentual_capital"):
             cfg_op.set_percentual(pct)
+
+    # ── Parâmetros de Trading ──────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### 📐 Parâmetros de Trading")
+    st.caption("Defina os limiares de Z-score que controlam entradas, saídas e stop loss.")
+
+    z_ent_cfg  = cfg_op.get_z_entrada()
+    z_sai_cfg  = cfg_op.get_z_saida()
+    z_stop_cfg = cfg_op.get_z_stop()
+
+    col_ze, col_zs, col_zst = st.columns(3)
+
+    with col_ze:
+        z_ent_new = st.slider(
+            "🟢 Z Entrada — abrir posição",
+            min_value=0.5, max_value=5.0,
+            value=z_ent_cfg, step=0.1, format="%.1f",
+            help="Abre posição quando |Z-score| ultrapassa este valor"
+        )
+
+    with col_zs:
+        z_sai_new = st.slider(
+            "⚪ Z Saída — fechar posição",
+            min_value=0.1, max_value=2.0,
+            value=z_sai_cfg, step=0.1, format="%.1f",
+            help="Fecha posição quando |Z-score| fica abaixo deste valor (convergência)"
+        )
+
+    with col_zst:
+        z_stop_new = st.slider(
+            "🔴 Stop Loss",
+            min_value=2.0, max_value=6.0,
+            value=z_stop_cfg, step=0.1, format="%.1f",
+            help="Sai imediatamente se |Z-score| exceder este valor (situação extrema)"
+        )
+
+    # Validação
+    _z_erros = []
+    if z_sai_new >= z_ent_new:
+        _z_erros.append("⚠️ **Z Saída** deve ser menor que **Z Entrada**.")
+    if z_stop_new <= z_ent_new:
+        _z_erros.append("⚠️ **Stop Loss** deve ser maior que **Z Entrada**.")
+
+    if _z_erros:
+        for msg in _z_erros:
+            st.warning(msg)
+    else:
+        st.markdown(f"""
+        <div style="background:#12191f; border:1px solid #2d3250; border-radius:10px;
+                    padding:14px 24px; margin:8px 0;">
+            <div style="font-size:11px; color:#8892b0; text-transform:uppercase;
+                        letter-spacing:1px; margin-bottom:10px;">Prévia dos limiares</div>
+            <div style="font-family:monospace; font-size:13px; line-height:2;">
+                <span style="color:#ff5252;">────── Stop Loss ──</span>
+                <span style="color:#ff5252; font-weight:700; margin-left:8px;">±{z_stop_new:.1f}</span><br>
+                <span style="color:#ffd600;">────── Entrada ────</span>
+                <span style="color:#ffd600; font-weight:700; margin-left:8px;">±{z_ent_new:.1f}</span><br>
+                <span style="color:#8892b0;">── ── Saída ── ──</span>
+                <span style="color:#8892b0; font-weight:700; margin-left:8px;">±{z_sai_new:.1f}</span><br>
+                <span style="color:#444;">────────── Zero ───</span>
+                <span style="color:#444; font-weight:700; margin-left:8px;">0.0</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if z_ent_new != z_ent_cfg:
+            cfg_op.set_z_entrada(z_ent_new)
+        if z_sai_new != z_sai_cfg:
+            cfg_op.set_z_saida(z_sai_new)
+        if z_stop_new != z_stop_cfg:
+            cfg_op.set_z_stop(z_stop_new)
+
+    st.markdown("---")
 
     # ── Capital Manual ─────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
