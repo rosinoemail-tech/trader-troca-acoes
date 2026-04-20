@@ -462,27 +462,31 @@ with aba1:
                 """, unsafe_allow_html=True)
 
             with col_gauge:
+                _z_ent  = cfg_op.get_z_entrada()
+                _z_sai  = cfg_op.get_z_saida()
+                _z_stp  = cfg_op.get_z_stop()
+                _gauge_max = _z_stp + 0.5
                 cor = "#00c853" if is_buy else "#ff5252"
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=abs(z),
                     number={"font": {"color": cor, "size": 28}, "suffix": ""},
                     gauge={
-                        "axis": {"range": [0, 4], "tickcolor": "#8892b0",
+                        "axis": {"range": [0, _gauge_max], "tickcolor": "#8892b0",
                                  "tickfont": {"color": "#8892b0", "size": 10}},
                         "bar": {"color": cor, "thickness": 0.25},
                         "bgcolor": "#13141a",
                         "bordercolor": "#2d3250",
                         "steps": [
-                            {"range": [0, 0.5], "color": "#1a1f35"},
-                            {"range": [0.5, 2.0], "color": "#1e2235"},
-                            {"range": [2.0, 3.5], "color": "#1a2a1a" if is_buy else "#2a1a1a"},
-                            {"range": [3.5, 4.0], "color": "#3a1a1a"},
+                            {"range": [0, _z_sai], "color": "#1a1f35"},
+                            {"range": [_z_sai, _z_ent], "color": "#1e2235"},
+                            {"range": [_z_ent, _z_stp], "color": "#1a2a1a" if is_buy else "#2a1a1a"},
+                            {"range": [_z_stp, _gauge_max], "color": "#3a1a1a"},
                         ],
                         "threshold": {
                             "line": {"color": "white", "width": 2},
                             "thickness": 0.75,
-                            "value": 2.0,
+                            "value": _z_ent,
                         },
                     },
                 ))
@@ -650,7 +654,7 @@ with aba4:
                     padding:30px; text-align:center;">
             <p style="font-size:36px; margin:0;">📭</p>
             <p style="font-size:16px; color:#fff; margin:10px 0 4px;">Nenhuma posição aberta</p>
-            <p style="font-size:13px; color:#8892b0;">Posições são abertas automaticamente quando Z-score ≥ ±2.0</p>
+            <p style="font-size:13px; color:#8892b0;">Posições são abertas automaticamente quando Z-score ≥ ±{cfg_op.get_z_entrada():.1f}</p>
         </div>
         """, unsafe_allow_html=True)
     else:
