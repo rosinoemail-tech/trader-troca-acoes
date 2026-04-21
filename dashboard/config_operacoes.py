@@ -18,11 +18,12 @@ DEFAULTS = {
     "horario_fim":        "17:55", # horário de encerramento das operações
     "pares_habilitados":  {},      # { "PETR3F_PETR4F": True, ... }
     "qtd_maxima":         {},      # { "PETR3F_PETR4F": 100, ... }  0 = sem limite
-    "z_entrada":          2.0,     # Z-score para abrir posição
-    "z_saida":            0.5,     # Z-score para fechar posição (convergência)
-    "z_stop":             3.5,     # Z-score para stop loss
-    "lucro_alvo":         0.0,     # R$ de lucro para fechar posição (0 = desativado)
-    "correlacao_minima":  0.0,     # correlação mínima para manter posição (0 = desativado)
+    "z_entrada":           2.0,    # Z-score para abrir posição
+    "z_saida":             0.5,    # Z-score para fechar posição (convergência)
+    "z_stop":              3.5,    # Z-score para stop loss
+    "valor_por_operacao":  200.0,  # R$ alocado por operação (define slots automaticamente)
+    "percentual_lucro":    3.0,    # % de lucro sobre o capital alocado para fechar
+    "correlacao_minima":   0.0,    # correlação mínima para manter posição (0 = desativado)
 }
 
 
@@ -91,8 +92,11 @@ def get_z_saida() -> float:
 def get_z_stop() -> float:
     return float(_carregar().get("z_stop", 3.5))
 
-def get_lucro_alvo() -> float:
-    return float(_carregar().get("lucro_alvo", 0.0))
+def get_valor_por_operacao() -> float:
+    return float(_carregar().get("valor_por_operacao", 200.0))
+
+def get_percentual_lucro() -> float:
+    return float(_carregar().get("percentual_lucro", 3.0))
 
 def get_correlacao_minima() -> float:
     return float(_carregar().get("correlacao_minima", 0.0))
@@ -150,9 +154,14 @@ def set_z_stop(valor: float):
     cfg["z_stop"] = round(max(2.0, min(6.0, float(valor))), 2)
     _salvar(cfg)
 
-def set_lucro_alvo(valor: float):
+def set_valor_por_operacao(valor: float):
     cfg = _carregar()
-    cfg["lucro_alvo"] = max(0.0, round(float(valor), 2))
+    cfg["valor_por_operacao"] = max(10.0, round(float(valor), 2))
+    _salvar(cfg)
+
+def set_percentual_lucro(valor: float):
+    cfg = _carregar()
+    cfg["percentual_lucro"] = round(max(0.1, min(100.0, float(valor))), 2)
     _salvar(cfg)
 
 def set_correlacao_minima(valor: float):

@@ -957,40 +957,59 @@ with aba5:
             cfg_op.set_z_stop(z_stop_new)
 
     st.markdown("---")
-    st.markdown("#### 🎯 Condições de Saída Adicionais")
-    st.caption("O sistema fecha a posição quando **qualquer** condição for atingida primeiro. Deixe em 0 para desativar.")
+    st.markdown("#### 💼 Gestão de Capital por Operação")
+    st.caption("O robô abre quantas operações simultâneas couberem no saldo disponível com base no valor por operação.")
 
-    _lucro_alvo_cfg = cfg_op.get_lucro_alvo()
-    _corr_min_cfg   = cfg_op.get_correlacao_minima()
+    _valor_op_cfg  = cfg_op.get_valor_por_operacao()
+    _pct_lucro_cfg = cfg_op.get_percentual_lucro()
+    _corr_min_cfg  = cfg_op.get_correlacao_minima()
+    _saldo_efetivo = cfg_op.get_capital_manual() or 0.0
 
-    col_lucro, col_corr = st.columns(2)
+    col_vop, col_pct, col_slots = st.columns(3)
 
-    with col_lucro:
-        lucro_alvo_new = st.number_input(
-            "💰 Lucro Alvo por Par (R$)",
-            min_value=0.0, max_value=100000.0,
-            value=_lucro_alvo_cfg, step=0.01, format="%.2f",
-            help="Fecha a posição automaticamente quando o lucro do par atingir este valor em R$. 0 = desativado."
+    with col_vop:
+        valor_op_new = st.number_input(
+            "💰 Valor por Operação (R$)",
+            min_value=10.0, max_value=1000000.0,
+            value=_valor_op_cfg, step=10.0, format="%.2f",
+            help="Capital alocado em cada par. O robô abre quantas operações couberem no saldo disponível."
         )
-        if lucro_alvo_new > 0:
-            st.caption(f"✅ Ativo — fecha ao lucrar R$ {lucro_alvo_new:,.2f}")
-        else:
-            st.caption("⬜ Desativado")
 
-    with col_corr:
-        corr_min_new = st.slider(
-            "📉 Correlação Mínima",
-            min_value=0.0, max_value=1.0,
-            value=_corr_min_cfg, step=0.05, format="%.2f",
-            help="Fecha a posição se a correlação entre os ativos cair abaixo deste valor. 0 = desativado."
+    with col_pct:
+        pct_lucro_new = st.number_input(
+            "🎯 Lucro Alvo (%)",
+            min_value=0.1, max_value=100.0,
+            value=_pct_lucro_cfg, step=0.1, format="%.1f",
+            help="Fecha a posição quando o lucro atingir este % do capital alocado naquela operação."
         )
-        if corr_min_new > 0:
-            st.caption(f"✅ Ativo — fecha se correlação < {corr_min_new:.2f}")
-        else:
-            st.caption("⬜ Desativado")
 
-    if lucro_alvo_new != _lucro_alvo_cfg:
-        cfg_op.set_lucro_alvo(lucro_alvo_new)
+    with col_slots:
+        slots_possiveis = int(_saldo_efetivo // valor_op_new) if valor_op_new > 0 and _saldo_efetivo > 0 else "—"
+        lucro_por_op    = round(valor_op_new * pct_lucro_new / 100, 2)
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.metric("Slots simultâneos", slots_possiveis)
+        st.caption(f"Alvo por op: R$ {lucro_por_op:.2f}")
+
+    if valor_op_new != _valor_op_cfg:
+        cfg_op.set_valor_por_operacao(valor_op_new)
+    if pct_lucro_new != _pct_lucro_cfg:
+        cfg_op.set_percentual_lucro(pct_lucro_new)
+
+    st.markdown("---")
+    st.markdown("#### 🛡️ Proteção Adicional")
+    st.caption("Fecha a posição se a correlação entre os ativos cair abaixo do mínimo. 0 = desativado.")
+
+    corr_min_new = st.slider(
+        "📉 Correlação Mínima",
+        min_value=0.0, max_value=1.0,
+        value=_corr_min_cfg, step=0.05, format="%.2f",
+        help="Fecha a posição se a correlação cair abaixo deste valor. 0 = desativado."
+    )
+    if corr_min_new > 0:
+        st.caption(f"✅ Ativo — fecha se correlação < {corr_min_new:.2f}")
+    else:
+        st.caption("⬜ Desativado")
+
     if corr_min_new != _corr_min_cfg:
         cfg_op.set_correlacao_minima(corr_min_new)
 

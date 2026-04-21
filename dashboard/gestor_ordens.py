@@ -15,7 +15,7 @@ import posicoes as pos
 logger = logging.getLogger(__name__)
 
 MAGIC = 234001          # identificador das ordens deste sistema
-LOG_FILE = "log_ordens.json"
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log_ordens.json")
 
 # Horário padrão B3 (sobreposto pelos horários configurados no painel)
 _MERCADO_ABRE_PADRAO  = dtime(10, 0)
@@ -96,48 +96,67 @@ def calcular_quantidade(preco_a: float, preco_b: float,
     return max(qty_a, 1), max(qty_b, 1)
 
 
-def calcular_distribuicao(oportunidades: list) -> list:  # noqa: E302
+def calcular_distribuicao(oportunidades: list) -> list:
     """
-    Dado o saldo e % configurado, distribui capital
-    igualmente entre os pares habilitados com oportunidade,
-    ordenados do maior Z-score para o menor.
-
-    Retorna lista de dicts com par + qty calculado.
+    Cada oportunidade recebe exatamente valor_por_operacao.
+    Só inclui a operação se houver saldo suficiente.
+    Slots simultâneos = saldo_livre // valor_por_operacao.
     """
-    saldo = get_saldo_livre()
-    percentual = cfg.get_percentual()
-    capital_total = saldo * (percentual / 100)
+    saldo         = get_saldo_livre()
+    valor_por_op  = cfg.get_valor_por_operacao()
+    pct_lucro     = cfg.get_percentual_lucro()
 
-    if not oportunidades or capital_total <= 0:
+    if not oportunidades or saldo < valor_por_op:
         return []
 
-    capital_por_par = capital_total / len(oportunidades)
+    resultado     = []
+    saldo_restante = saldo
 
-    resultado = []
     for op in oportunidades:
-        qty_a, qty_b = calcular_quantidade(
-            op["preco_a"], op["preco_b"], capital_por_par
-        )
+        if saldo_restante < valor_por_op:
+            break
 
-        # Aplica limite máximo configurado (0 = sem limite)
+        qty_a, qty_b = calcular_quantidade(op["preco_a"], op["preco_b"], valor_por_op)
+
         qtd_max = cfg.get_qtd_maxima(op["par_a"], op["par_b"])
         if qtd_max > 0:
             qty_a = min(qty_a, qtd_max)
             qty_b = min(qty_b, qtd_max)
 
-        custo_estimado = (qty_a * op["preco_a"]) + (qty_b * op["preco_b"])
+        custo_estimado = round((qty_a * op["preco_a"]) + (qty_b * op["preco_b"]), 2)
+        lucro_alvo     = round(custo_estimado * pct_lucro / 100, 2)
+        saldo_restante -= custo_estimado
+
         resultado.append({
             **op,
             "qty_a":           qty_a,
             "qty_b":           qty_b,
             "qtd_max":         qtd_max,
-            "capital_alocado": round(custo_estimado, 2),
+            "capital_alocado": custo_estimado,
+            "lucro_alvo":      lucro_alvo,
         })
 
     return resultado
 
 
 # ── Envio de ordem ───────────────────────────────────────────
+
+def _filling_mode(symbol: str) -> int:
+    """
+    Detecta o modo de preenchimento suportado pelo símbolo.
+    B3 via Genial usa RETURN (3). Fallback para IOC se não suportado.
+    """
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        return mt5.ORDER_FILLING_RETURN
+    filling = info.filling_mode
+    # bit 0 = FOK, bit 1 = IOC, bit 2 = RETURN
+    if filling & 4:   # RETURN suportado
+        return mt5.ORDER_FILLING_RETURN
+    if filling & 2:   # IOC suportado
+        return mt5.ORDER_FILLING_IOC
+    return mt5.ORDER_FILLING_FOK
+
 
 def _enviar_ordem(symbol: str, volume: int,
                   tipo: int, comment: str = "") -> dict:
@@ -146,6 +165,11 @@ def _enviar_ordem(symbol: str, volume: int,
 
     tipo: mt5.ORDER_TYPE_BUY ou mt5.ORDER_TYPE_SELL
     """
+    # Verifica se Auto Trade está habilitado no terminal MT5
+    terminal = mt5.terminal_info()
+    if terminal is None or not terminal.trade_allowed:
+        return {"ok": False, "erro": "Auto Trade desativado no MT5. Ative o botão 'Auto Trading' na barra do terminal."}
+
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
         return {"ok": False, "erro": f"Sem tick para {symbol}"}
@@ -153,32 +177,48 @@ def _enviar_ordem(symbol: str, volume: int,
     price = tick.ask if tipo == mt5.ORDER_TYPE_BUY else tick.bid
 
     info_sym = mt5.symbol_info(symbol)
-    volume_min = info_sym.volume_min if info_sym else 1.0
+    if info_sym is None:
+        return {"ok": False, "erro": f"Símbolo não encontrado: {symbol}"}
+
+    volume_min  = info_sym.volume_min
+    volume_step = info_sym.volume_step if info_sym.volume_step > 0 else volume_min
+    # Arredonda para múltiplo do step mínimo
     volume_real = max(float(volume), volume_min)
+    volume_real = round(round(volume_real / volume_step) * volume_step, 8)
+
+    filling = _filling_mode(symbol)
 
     request = {
-        "action":      mt5.TRADE_ACTION_DEAL,
-        "symbol":      symbol,
-        "volume":      volume_real,
-        "type":        tipo,
-        "price":       price,
-        "deviation":   50,
-        "magic":       MAGIC,
-        "comment":     f"TraderTrocaAcoes {comment}"[:31],
-        "type_time":   mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
+        "action":       mt5.TRADE_ACTION_DEAL,
+        "symbol":       symbol,
+        "volume":       volume_real,
+        "type":         tipo,
+        "price":        price,
+        "deviation":    50,
+        "magic":        MAGIC,
+        "comment":      f"TraderTrocaAcoes {comment}"[:31],
+        "type_time":    mt5.ORDER_TIME_GTC,
+        "type_filling": filling,
     }
 
     result = mt5.order_send(request)
 
     ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
+    erro_detalhe = ""
+    if not ok:
+        mt5_err = mt5.last_error()
+        retcode = result.retcode if result else -1
+        erro_detalhe = f"retcode={retcode} | mt5_error={mt5_err} | filling={filling}"
+        logger.error(f"❌ Ordem rejeitada: {symbol} vol={volume_real} | {erro_detalhe}")
+
     return {
         "ok":      ok,
         "retcode": result.retcode if result else -1,
         "ticket":  result.order  if (result and ok) else None,
         "volume":  volume_real,
         "price":   price,
-        "erro":    "" if ok else mt5.last_error(),
+        "filling": filling,
+        "erro":    erro_detalhe if not ok else "",
     }
 
 
@@ -221,13 +261,14 @@ def executar_par(par_a: str, par_b: str, sinal: str,
     }
 
     if simulacao:
-        custo = (qty_a * preco_a) + (qty_b * preco_b)
+        custo      = (qty_a * preco_a) + (qty_b * preco_b)
+        lucro_alvo = round(custo * cfg.get_percentual_lucro() / 100, 2)
         log["status"] = "simulado"
         log["custo_estimado"] = round(custo, 2)
-        logger.info(f"[SIMULAÇÃO] {descricao} | Z={zscore:.3f} | Custo≈R${custo:.2f}")
+        log["lucro_alvo"]     = lucro_alvo
+        logger.info(f"[SIMULAÇÃO] {descricao} | Z={zscore:.3f} | Custo≈R${custo:.2f} | Alvo R${lucro_alvo:.2f}")
         _registrar_log(log)
-        # Registra posição simulada
-        pos.abrir_posicao(par_a, par_b, setor, sinal, zscore, preco_a, preco_b)
+        pos.abrir_posicao(par_a, par_b, setor, sinal, zscore, preco_a, preco_b, lucro_alvo=lucro_alvo)
         return log
 
     # ── Execução real ──────────────────────────────────────
@@ -245,9 +286,11 @@ def executar_par(par_a: str, par_b: str, sinal: str,
     log["status"] = "executado" if (res_a["ok"] and res_b["ok"]) else "erro"
 
     if res_a["ok"] and res_b["ok"]:
+        custo      = (qty_a * preco_a) + (qty_b * preco_b)
+        lucro_alvo = round(custo * cfg.get_percentual_lucro() / 100, 2)
         logger.info(f"✅ Executado: {descricao} | "
-                    f"A ticket={res_a['ticket']} B ticket={res_b['ticket']}")
-        pos.abrir_posicao(par_a, par_b, setor, sinal, zscore, preco_a, preco_b)
+                    f"A ticket={res_a['ticket']} B ticket={res_b['ticket']} | Alvo R${lucro_alvo:.2f}")
+        pos.abrir_posicao(par_a, par_b, setor, sinal, zscore, preco_a, preco_b, lucro_alvo=lucro_alvo)
     else:
         logger.error(f"❌ Erro ao executar {descricao}: A={res_a} B={res_b}")
 

@@ -140,14 +140,14 @@ def analisar_todos_pares(pares: list) -> list:
             quantidade = p.get("quantidade_mt5") or 10
             pl_atual   = pos.calcular_pl(p, dados["preco_a"], dados["preco_b"], quantidade)
 
-            lucro_alvo      = cfg_op.get_lucro_alvo()
+            lucro_alvo_pos  = p.get("lucro_alvo") or 0.0
             corr_minima     = cfg_op.get_correlacao_minima()
             correlacao_atual = dados.get("correlacao", 1.0)
 
             motivo = None
 
-            # 1. Lucro alvo atingido
-            if lucro_alvo > 0 and pl_atual >= lucro_alvo:
+            # 1. Lucro alvo atingido (% do capital alocado na posição)
+            if lucro_alvo_pos > 0 and pl_atual >= lucro_alvo_pos:
                 motivo = "lucro_alvo"
 
             # 2. Correlação abaixo do mínimo
@@ -238,20 +238,20 @@ def executar_ciclo(resultados: list):
             _log.info("[EXEC] Nenhuma oportunidade com par habilitado e sem posição aberta.")
 
     # Fecha automaticamente posições que atingiram condição de saída
-    lucro_alvo  = cfg_op.get_lucro_alvo()
     corr_minima = cfg_op.get_correlacao_minima()
 
     for r in resultados:
-        z = r.get("zscore_atual") or 0
+        z    = r.get("zscore_atual") or 0
         corr = r.get("correlacao", 1.0)
         for p in pos.listar_abertas():
             if p["par_a"] != r["par_a"] or p["par_b"] != r["par_b"]:
                 continue
-            quantidade = p.get("quantidade_mt5") or 10
-            pl_atual   = pos.calcular_pl(p, r["preco_a"], r["preco_b"], quantidade)
+            quantidade     = p.get("quantidade_mt5") or 10
+            pl_atual       = pos.calcular_pl(p, r["preco_a"], r["preco_b"], quantidade)
+            lucro_alvo_pos = p.get("lucro_alvo") or 0.0
 
             motivo = None
-            if lucro_alvo > 0 and pl_atual >= lucro_alvo:
+            if lucro_alvo_pos > 0 and pl_atual >= lucro_alvo_pos:
                 motivo = "lucro_alvo"
             elif corr_minima > 0 and corr < corr_minima:
                 motivo = "correlacao"
@@ -259,7 +259,7 @@ def executar_ciclo(resultados: list):
                 motivo = "zscore"
 
             if motivo:
-                _log.info(f"[EXEC] Fechando {r['par_a']}/{r['par_b']} motivo={motivo} pl={pl_atual:.2f} corr={corr:.2f}")
+                _log.info(f"[EXEC] Fechando {r['par_a']}/{r['par_b']} motivo={motivo} pl={pl_atual:.2f} alvo={lucro_alvo_pos:.2f}")
                 gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao)
 
 

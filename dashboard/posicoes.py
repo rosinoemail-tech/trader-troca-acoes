@@ -30,7 +30,8 @@ def _salvar(posicoes: list):
 
 def abrir_posicao(par_a: str, par_b: str, setor: str, sinal: str,
                   zscore: float, preco_a: float, preco_b: float,
-                  quantidade: int = None, origem: str = "robo"):
+                  quantidade: int = None, origem: str = "robo",
+                  lucro_alvo: float = None):
     """
     Registra uma nova posição aberta.
     Ignora se já existe posição aberta para esse par.
@@ -60,11 +61,13 @@ def abrir_posicao(par_a: str, par_b: str, setor: str, sinal: str,
         "status":          "aberta",
         "origem":          origem,
         "quantidade_mt5":  quantidade,
+        "lucro_alvo":      round(lucro_alvo, 2) if lucro_alvo is not None else None,
         "data_fechamento": None,
         "preco_saida_a":   None,
         "preco_saida_b":   None,
         "zscore_saida":    None,
         "pl_final":        None,
+        "motivo_fechamento": None,
     })
     _salvar(posicoes)
 
