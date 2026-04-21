@@ -957,6 +957,44 @@ with aba5:
             cfg_op.set_z_stop(z_stop_new)
 
     st.markdown("---")
+    st.markdown("#### 🎯 Condições de Saída Adicionais")
+    st.caption("O sistema fecha a posição quando **qualquer** condição for atingida primeiro. Deixe em 0 para desativar.")
+
+    _lucro_alvo_cfg = cfg_op.get_lucro_alvo()
+    _corr_min_cfg   = cfg_op.get_correlacao_minima()
+
+    col_lucro, col_corr = st.columns(2)
+
+    with col_lucro:
+        lucro_alvo_new = st.number_input(
+            "💰 Lucro Alvo por Par (R$)",
+            min_value=0.0, max_value=100000.0,
+            value=_lucro_alvo_cfg, step=10.0, format="%.2f",
+            help="Fecha a posição automaticamente quando o lucro do par atingir este valor em R$. 0 = desativado."
+        )
+        if lucro_alvo_new > 0:
+            st.caption(f"✅ Ativo — fecha ao lucrar R$ {lucro_alvo_new:,.2f}")
+        else:
+            st.caption("⬜ Desativado")
+
+    with col_corr:
+        corr_min_new = st.slider(
+            "📉 Correlação Mínima",
+            min_value=0.0, max_value=1.0,
+            value=_corr_min_cfg, step=0.05, format="%.2f",
+            help="Fecha a posição se a correlação entre os ativos cair abaixo deste valor. 0 = desativado."
+        )
+        if corr_min_new > 0:
+            st.caption(f"✅ Ativo — fecha se correlação < {corr_min_new:.2f}")
+        else:
+            st.caption("⬜ Desativado")
+
+    if lucro_alvo_new != _lucro_alvo_cfg:
+        cfg_op.set_lucro_alvo(lucro_alvo_new)
+    if corr_min_new != _corr_min_cfg:
+        cfg_op.set_correlacao_minima(corr_min_new)
+
+    st.markdown("---")
 
     # ── Capital Manual ─────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)

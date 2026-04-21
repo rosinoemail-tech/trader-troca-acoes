@@ -21,6 +21,8 @@ DEFAULTS = {
     "z_entrada":          2.0,     # Z-score para abrir posição
     "z_saida":            0.5,     # Z-score para fechar posição (convergência)
     "z_stop":             3.5,     # Z-score para stop loss
+    "lucro_alvo":         0.0,     # R$ de lucro para fechar posição (0 = desativado)
+    "correlacao_minima":  0.0,     # correlação mínima para manter posição (0 = desativado)
 }
 
 
@@ -89,6 +91,12 @@ def get_z_saida() -> float:
 def get_z_stop() -> float:
     return float(_carregar().get("z_stop", 3.5))
 
+def get_lucro_alvo() -> float:
+    return float(_carregar().get("lucro_alvo", 0.0))
+
+def get_correlacao_minima() -> float:
+    return float(_carregar().get("correlacao_minima", 0.0))
+
 
 # ── Escrita ──────────────────────────────────────────────────
 
@@ -140,6 +148,16 @@ def set_z_saida(valor: float):
 def set_z_stop(valor: float):
     cfg = _carregar()
     cfg["z_stop"] = round(max(2.0, min(6.0, float(valor))), 2)
+    _salvar(cfg)
+
+def set_lucro_alvo(valor: float):
+    cfg = _carregar()
+    cfg["lucro_alvo"] = max(0.0, round(float(valor), 2))
+    _salvar(cfg)
+
+def set_correlacao_minima(valor: float):
+    cfg = _carregar()
+    cfg["correlacao_minima"] = round(max(0.0, min(1.0, float(valor))), 2)
     _salvar(cfg)
 
 def set_qtd_maxima(par_a: str, par_b: str, qtd: int):

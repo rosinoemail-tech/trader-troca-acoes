@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime
 
-POSICOES_FILE = "posicoes.json"
+POSICOES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "posicoes.json")
 
 
 # ── Leitura / Escrita ────────────────────────────────────────
@@ -70,9 +70,12 @@ def abrir_posicao(par_a: str, par_b: str, setor: str, sinal: str,
 
 
 def fechar_posicao(pos_id: str, preco_saida_a: float,
-                   preco_saida_b: float, zscore_saida: float, quantidade: int):
+                   preco_saida_b: float, zscore_saida: float, quantidade: int,
+                   motivo: str = "zscore"):
     """
     Marca uma posição como fechada e calcula o P&L final.
+
+    motivo: "zscore" | "lucro_alvo" | "correlacao" | "stop" | "manual"
     """
     posicoes = _carregar()
 
@@ -85,6 +88,7 @@ def fechar_posicao(pos_id: str, preco_saida_a: float,
             p["preco_saida_b"]   = round(preco_saida_b, 4)
             p["zscore_saida"]    = round(zscore_saida, 4)
             p["pl_final"]        = round(pl, 2)
+            p["motivo_fechamento"] = motivo
             break
 
     _salvar(posicoes)

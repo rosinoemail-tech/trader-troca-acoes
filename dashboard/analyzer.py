@@ -131,18 +131,42 @@ def analisar_todos_pares(pares: list) -> list:
         if dados["sinal"] in ("VENDER_A", "COMPRAR_A"):
             _salvar_oportunidade(dados)
 
-        # Z voltou ao neutro → fecha posição automaticamente
-        if abs(z_atual) <= _z_saida():
-            abertas = pos.listar_abertas()
-            for p in abertas:
-                if p["par_a"] == dados["par_a"] and p["par_b"] == dados["par_b"]:
-                    pos.fechar_posicao(
-                        pos_id        = p["id"],
-                        preco_saida_a = dados["preco_a"],
-                        preco_saida_b = dados["preco_b"],
-                        zscore_saida  = z_atual,
-                        quantidade    = 10,  # padrão; usuário pode alterar no painel
-                    )
+        # Verifica condições de saída para posições abertas neste par
+        abertas = pos.listar_abertas()
+        for p in abertas:
+            if p["par_a"] != dados["par_a"] or p["par_b"] != dados["par_b"]:
+                continue
+
+            quantidade = p.get("quantidade_mt5") or 10
+            pl_atual   = pos.calcular_pl(p, dados["preco_a"], dados["preco_b"], quantidade)
+
+            lucro_alvo      = cfg_op.get_lucro_alvo()
+            corr_minima     = cfg_op.get_correlacao_minima()
+            correlacao_atual = dados.get("correlacao", 1.0)
+
+            motivo = None
+
+            # 1. Lucro alvo atingido
+            if lucro_alvo > 0 and pl_atual >= lucro_alvo:
+                motivo = "lucro_alvo"
+
+            # 2. Correlação abaixo do mínimo
+            elif corr_minima > 0 and correlacao_atual < corr_minima:
+                motivo = "correlacao"
+
+            # 3. Z-score voltou ao neutro (saída normal)
+            elif abs(z_atual) <= _z_saida():
+                motivo = "zscore"
+
+            if motivo:
+                pos.fechar_posicao(
+                    pos_id        = p["id"],
+                    preco_saida_a = dados["preco_a"],
+                    preco_saida_b = dados["preco_b"],
+                    zscore_saida  = z_atual,
+                    quantidade    = quantidade,
+                    motivo        = motivo,
+                )
 
     # Ordena: oportunidades primeiro, depois por |Z| (maior = melhor)
     resultados = sorted(
@@ -213,12 +237,30 @@ def executar_ciclo(resultados: list):
         if not simulacao:
             _log.info("[EXEC] Nenhuma oportunidade com par habilitado e sem posição aberta.")
 
-    # Fecha automaticamente posições cujo Z voltou ao neutro
+    # Fecha automaticamente posições que atingiram condição de saída
+    lucro_alvo  = cfg_op.get_lucro_alvo()
+    corr_minima = cfg_op.get_correlacao_minima()
+
     for r in resultados:
-        if abs(r.get("zscore_atual") or 1) <= _z_saida():
-            for p in pos.listar_abertas():
-                if p["par_a"] == r["par_a"] and p["par_b"] == r["par_b"]:
-                    gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao)
+        z = r.get("zscore_atual") or 0
+        corr = r.get("correlacao", 1.0)
+        for p in pos.listar_abertas():
+            if p["par_a"] != r["par_a"] or p["par_b"] != r["par_b"]:
+                continue
+            quantidade = p.get("quantidade_mt5") or 10
+            pl_atual   = pos.calcular_pl(p, r["preco_a"], r["preco_b"], quantidade)
+
+            motivo = None
+            if lucro_alvo > 0 and pl_atual >= lucro_alvo:
+                motivo = "lucro_alvo"
+            elif corr_minima > 0 and corr < corr_minima:
+                motivo = "correlacao"
+            elif abs(z) <= _z_saida():
+                motivo = "zscore"
+
+            if motivo:
+                _log.info(f"[EXEC] Fechando {r['par_a']}/{r['par_b']} motivo={motivo} pl={pl_atual:.2f} corr={corr:.2f}")
+                gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao)
 
 
 # ── Histórico de oportunidades ───────────────────────────────
