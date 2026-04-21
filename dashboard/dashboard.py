@@ -969,7 +969,7 @@ with aba5:
         lucro_alvo_new = st.number_input(
             "💰 Lucro Alvo por Par (R$)",
             min_value=0.0, max_value=100000.0,
-            value=_lucro_alvo_cfg, step=10.0, format="%.2f",
+            value=_lucro_alvo_cfg, step=0.01, format="%.2f",
             help="Fecha a posição automaticamente quando o lucro do par atingir este valor em R$. 0 = desativado."
         )
         if lucro_alvo_new > 0:
