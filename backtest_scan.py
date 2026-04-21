@@ -33,11 +33,15 @@ PARES = [
     ("SUZB3F",  "KLBN11F",  "Papel/Celulose"),
 ]
 
-LOOKBACK      = 60
-N_BARRAS      = 250   # ~1 ano para ter janela suficiente
-LIMIAR_Z      = 3.0
-LUCRO_ALVO    = 9.0   # R$
-CAPITAL_TOTAL = 1000.0
+LOOKBACK        = 60
+N_BARRAS        = 250    # ~1 ano para ter janela suficiente
+LIMIAR_Z        = 3.0
+CAPITAL_TOTAL   = 1000.0
+MAX_OPERACOES   = 3      # slots simultâneos
+PERCENTUAL_LUCRO = 3.0   # % do capital alocado na operação
+DIAS_BACKTEST   = 22     # ~1 mês útil
+
+CAPITAL_POR_SLOT = CAPITAL_TOTAL / MAX_OPERACOES  # R$ 333,33
 
 # ── Busca histórico de cada símbolo ──────────────────────────
 print("Buscando dados do MT5...")
@@ -56,110 +60,88 @@ for par_a, par_b, _ in PARES:
 mt5.shutdown()
 
 # ── Simulação dia a dia ───────────────────────────────────────
-capital     = CAPITAL_TOTAL
-posicoes    = {}
+posicoes    = {}   # chave -> posicao aberta
 log_eventos = []
 
-# Datas dos últimos 3 meses: pega de qualquer ativo com dados recentes
+# Datas do último mês
 todas_datas = sorted(set.union(*[set(s.index) for s in historico.values()]))
-tres_meses  = todas_datas[-65:]  # ~65 dias úteis = 3 meses
+tres_meses  = todas_datas[-DIAS_BACKTEST:]
 
 for data in tres_meses:
     eventos_dia = []
 
-    # ── Verifica fechamentos antes de abrir ─────────────────
+    slots_livres = MAX_OPERACOES - len(posicoes)
+
+    # ── Verifica fechamentos ─────────────────────────────────
     for chave in list(posicoes.keys()):
-        p = posicoes[chave]
+        p    = posicoes[chave]
         par_a, par_b = chave
         if par_a not in historico or par_b not in historico:
             continue
         if data not in historico[par_a].index or data not in historico[par_b].index:
             continue
 
-        preco_a_atual = historico[par_a][data]
-        preco_b_atual = historico[par_b][data]
-        qty_a = p["qty_a"]
-        qty_b = p["qty_b"]
+        pa = historico[par_a][data]
+        pb = historico[par_b][data]
 
         if p["sinal"] == "COMPRAR_A":
-            pl = (preco_a_atual - p["preco_a"]) * qty_a + (p["preco_b"] - preco_b_atual) * qty_b
+            pl = (pa - p["preco_a"]) * p["qty_a"] + (p["preco_b"] - pb) * p["qty_b"]
         else:
-            pl = (p["preco_a"] - preco_a_atual) * qty_a + (preco_b_atual - p["preco_b"]) * qty_b
+            pl = (p["preco_a"] - pa) * p["qty_a"] + (pb - p["preco_b"]) * p["qty_b"]
 
-        if pl >= LUCRO_ALVO:
-            capital += p["capital_alocado"] + pl
+        lucro_alvo_pos = p["lucro_alvo"]
+
+        if pl >= lucro_alvo_pos:
+            slots_livres += 1
             eventos_dia.append({
-                "data":    str(data),
-                "tipo":    "VENDA",
-                "par":     f"{par_a}/{par_b}",
-                "sinal":   p["sinal"],
-                "z_entr":  p["z_entrada"],
-                "pl":      round(pl, 2),
-                "capital": round(capital, 2),
-                "motivo":  f"Lucro R$ {pl:.2f} >= R$ {LUCRO_ALVO:.2f}",
+                "data":   str(data),
+                "tipo":   "VENDA",
+                "par":    f"{par_a}/{par_b}",
+                "z_entr": p["z_entrada"],
+                "pl":     round(pl, 2),
+                "alvo":   round(lucro_alvo_pos, 2),
+                "slots":  f"{MAX_OPERACOES - len(posicoes) + 1}/{MAX_OPERACOES}",
+                "motivo": f"Lucro R${pl:.2f} >= alvo R${lucro_alvo_pos:.2f} ({PERCENTUAL_LUCRO}% de R${p['capital_alocado']:.2f})",
             })
             del posicoes[chave]
 
     # ── Verifica aberturas ───────────────────────────────────
     for par_a, par_b, setor in PARES:
+        if slots_livres <= 0:
+            break
         chave = (par_a, par_b)
         if chave in posicoes:
             continue
         if par_a not in historico or par_b not in historico:
             continue
 
-        # Precisa de janela suficiente até esta data
-        datas_a = [d for d in historico[par_a].index if d <= data]
-        datas_b = [d for d in historico[par_b].index if d <= data]
-        datas_comuns = sorted(set(datas_a) & set(datas_b))
-
+        datas_comuns = sorted(set(d for d in historico[par_a].index if d <= data) &
+                              set(d for d in historico[par_b].index if d <= data))
         if len(datas_comuns) < LOOKBACK + 10:
             continue
 
         janela = datas_comuns[-(LOOKBACK + 30):]
         sa = historico[par_a][janela]
         sb = historico[par_b][janela]
-
-        la = np.log(sa)
-        lb = np.log(sb)
+        la = np.log(sa); lb = np.log(sb)
         slope, _, _, _, _ = linregress(lb.values, la.values)
         sp   = la - slope * lb
-        mean = sp.rolling(LOOKBACK).mean()
-        std  = sp.rolling(LOOKBACK).std()
-        zs   = ((sp - mean) / std).dropna()
+        zs   = ((sp - sp.rolling(LOOKBACK).mean()) / sp.rolling(LOOKBACK).std()).dropna()
 
-        if len(zs) == 0:
+        if len(zs) == 0 or abs(float(zs.iloc[-1])) < LIMIAR_Z:
             continue
 
         z_atual = float(zs.iloc[-1])
-
-        if abs(z_atual) < LIMIAR_Z:
-            continue
-
-        # Há capital disponível?
-        if capital < 50:
-            eventos_dia.append({
-                "data":    str(data),
-                "tipo":    "BLOQUEADO",
-                "par":     f"{par_a}/{par_b}",
-                "sinal":   "COMPRAR_A" if z_atual < 0 else "VENDER_A",
-                "z_entr":  round(z_atual, 2),
-                "pl":      None,
-                "capital": round(capital, 2),
-                "motivo":  "Sem capital disponivel",
-            })
-            continue
-
         preco_a = historico[par_a][data]
         preco_b = historico[par_b][data]
 
-        cap_por_ponta = capital / 2
+        cap_por_ponta = CAPITAL_POR_SLOT / 2
         qty_a = max(int(cap_por_ponta / preco_a), 1)
         qty_b = max(int(cap_por_ponta / preco_b), 1)
         capital_alocado = round(qty_a * preco_a + qty_b * preco_b, 2)
-
+        lucro_alvo_pos  = round(capital_alocado * PERCENTUAL_LUCRO / 100, 2)
         sinal = "COMPRAR_A" if z_atual < 0 else "VENDER_A"
-        capital -= capital_alocado
+        slots_livres -= 1
 
         posicoes[chave] = {
             "sinal":           sinal,
@@ -168,73 +150,54 @@ for data in tres_meses:
             "qty_a":           qty_a,
             "qty_b":           qty_b,
             "capital_alocado": capital_alocado,
+            "lucro_alvo":      lucro_alvo_pos,
             "data_entrada":    str(data),
             "z_entrada":       round(z_atual, 2),
         }
 
         eventos_dia.append({
-            "data":    str(data),
-            "tipo":    "COMPRA",
-            "par":     f"{par_a}/{par_b}",
-            "sinal":   sinal,
-            "z_entr":  round(z_atual, 2),
-            "pl":      None,
-            "capital": round(capital, 2),
-            "motivo":  f"Z={z_atual:.2f} | {qty_a}x{par_a} + {qty_b}x{par_b} | R${capital_alocado:.2f}",
+            "data":   str(data),
+            "tipo":   "COMPRA",
+            "par":    f"{par_a}/{par_b}",
+            "z_entr": round(z_atual, 2),
+            "pl":     None,
+            "alvo":   lucro_alvo_pos,
+            "slots":  f"{MAX_OPERACOES - slots_livres}/{MAX_OPERACOES}",
+            "motivo": f"Z={z_atual:.2f} | {qty_a}x{par_a}+{qty_b}x{par_b} | R${capital_alocado:.2f} | alvo R${lucro_alvo_pos:.2f}",
         })
-
-    # P&L aberto no dia
-    pl_aberto = 0.0
-    for chave, p in posicoes.items():
-        par_a, par_b = chave
-        if par_a not in historico or par_b not in historico:
-            continue
-        if data not in historico[par_a].index or data not in historico[par_b].index:
-            continue
-        pa = historico[par_a][data]
-        pb = historico[par_b][data]
-        if p["sinal"] == "COMPRAR_A":
-            pl_aberto += (pa - p["preco_a"]) * p["qty_a"] + (p["preco_b"] - pb) * p["qty_b"]
-        else:
-            pl_aberto += (p["preco_a"] - pa) * p["qty_a"] + (pb - p["preco_b"]) * p["qty_b"]
 
     log_eventos.extend(eventos_dia)
 
 # ── Relatório ────────────────────────────────────────────────
-print("")
-print("=" * 75)
-print("  BACKTEST --- CAPITAL R$1.000 | Z >= 3 ENTRA | LUCRO R$9 SAI")
-print("=" * 75)
-
 vendas  = [e for e in log_eventos if e["tipo"] == "VENDA"]
 compras = [e for e in log_eventos if e["tipo"] == "COMPRA"]
-bloq    = [e for e in log_eventos if e["tipo"] == "BLOQUEADO"]
-
-print(f"\n  RESUMO")
-print(f"  Capital inicial : R$ {CAPITAL_TOTAL:.2f}")
-print(f"  Capital final   : R$ {capital:.2f}")
 pl_realizado = sum(e["pl"] for e in vendas)
-print(f"  Lucro realizado : R$ {pl_realizado:.2f}")
-print(f"  Operacoes abertas (nao fechadas): {len(posicoes)}")
-print(f"  Total de entradas : {len(compras)}")
-print(f"  Total de saidas   : {len(vendas)}")
-print(f"  Vezes bloqueado   : {len(bloq)}")
 
-print(f"\n  EVENTOS DIA A DIA")
-print(f"  {'DATA':<12} {'TIPO':<9} {'PAR':<22} {'Z':<7} {'P&L':>7}  {'CAIXA':>8}  DETALHE")
-print(f"  " + "-" * 72)
+print("")
+print("=" * 80)
+print(f"  BACKTEST 1 MES | CAPITAL R${CAPITAL_TOTAL:.0f} | {MAX_OPERACOES} SLOTS | Z>={LIMIAR_Z} ENTRA | LUCRO {PERCENTUAL_LUCRO}% SAI")
+print("=" * 80)
+print(f"  Capital total     : R$ {CAPITAL_TOTAL:.2f}")
+print(f"  Capital por slot  : R$ {CAPITAL_POR_SLOT:.2f}")
+print(f"  Lucro alvo/op     : {PERCENTUAL_LUCRO}% do capital alocado")
+print(f"  Entradas          : {len(compras)}")
+print(f"  Saidas (realizadas): {len(vendas)}")
+print(f"  Lucro realizado   : R$ {pl_realizado:.2f}")
+print(f"  Posicoes em aberto: {len(posicoes)}")
+print("")
+print(f"  {'DATA':<12} {'TIPO':<7} {'SLOT':<7} {'PAR':<22} {'Z':>5}  {'ALVO':>7}  {'P&L':>7}  DETALHE")
+print(f"  " + "-" * 78)
 
 for e in log_eventos:
-    pl_str = f"R${e['pl']:.2f}" if e["pl"] is not None else "---"
-    print(f"  {e['data']:<12} {e['tipo']:<9} {e['par']:<22} {e['z_entr']:<7} {pl_str:>7}  R${e['capital']:>7.2f}  {e['motivo']}")
+    pl_str   = f"R${e['pl']:>7.2f}" if e["pl"] is not None else "       ---"
+    alvo_str = f"R${e['alvo']:>6.2f}"
+    print(f"  {e['data']:<12} {e['tipo']:<7} {e['slots']:<7} {e['par']:<22} {e['z_entr']:>5}  {alvo_str}  {pl_str}  {e['motivo']}")
 
-print(f"\n  POSICOES AINDA ABERTAS (nao atingiram R$9 no periodo)")
 if posicoes:
-    print(f"  {'PAR':<22} {'ENTRADA':<12} {'Z':<7} {'ALOCADO':>10}")
-    print(f"  " + "-" * 55)
+    print(f"\n  POSICOES ABERTAS (nao atingiram {PERCENTUAL_LUCRO}% no periodo):")
+    print(f"  {'PAR':<22} {'ENTRADA':<12} {'Z':>5}  {'ALOCADO':>9}  {'ALVO':>7}")
+    print(f"  " + "-" * 60)
     for (a, b), p in posicoes.items():
-        print(f"  {a}/{b:<20} {p['data_entrada']:<12} {p['z_entrada']:<7} R${p['capital_alocado']:>8.2f}")
-else:
-    print("  Nenhuma")
+        print(f"  {a}/{b:<20} {p['data_entrada']:<12} {p['z_entrada']:>5}  R${p['capital_alocado']:>7.2f}  R${p['lucro_alvo']:>5.2f}")
 
-print("=" * 75)
+print("=" * 80)
