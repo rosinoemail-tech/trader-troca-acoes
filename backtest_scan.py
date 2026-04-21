@@ -57,12 +57,11 @@ mt5.shutdown()
 
 # ── Simulação dia a dia ───────────────────────────────────────
 capital     = CAPITAL_TOTAL
-posicoes    = {}   # par -> {sinal, preco_a, preco_b, qty_a, qty_b, capital_alocado, data_entrada, z_entrada}
+posicoes    = {}
 log_eventos = []
-log_diario  = []
 
-# Datas comuns dos últimos 3 meses
-todas_datas = sorted(set.intersection(*[set(s.index) for s in historico.values()]))
+# Datas dos últimos 3 meses: pega de qualquer ativo com dados recentes
+todas_datas = sorted(set.union(*[set(s.index) for s in historico.values()]))
 tres_meses  = todas_datas[-65:]  # ~65 dias úteis = 3 meses
 
 for data in tres_meses:
@@ -198,14 +197,6 @@ for data in tres_meses:
             pl_aberto += (pa - p["preco_a"]) * p["qty_a"] + (p["preco_b"] - pb) * p["qty_b"]
         else:
             pl_aberto += (p["preco_a"] - pa) * p["qty_a"] + (pb - p["preco_b"]) * p["qty_b"]
-
-    log_diario.append({
-        "data":         str(data),
-        "capital_livre": round(capital, 2),
-        "posicoes":     len(posicoes),
-        "pl_aberto":    round(pl_aberto, 2),
-        "patrimonio":   round(capital + pl_aberto + sum(p["capital_alocado"] for p in posicoes.values()), 2),
-    })
 
     log_eventos.extend(eventos_dia)
 
