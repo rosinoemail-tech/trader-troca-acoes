@@ -39,7 +39,7 @@ LIMIAR_Z        = 3.0
 CAPITAL_TOTAL   = 1000.0
 MAX_OPERACOES   = 3      # slots simultâneos
 PERCENTUAL_LUCRO = 3.0   # % do capital alocado na operação
-DIAS_BACKTEST   = 22     # ~1 mês útil
+DIAS_BACKTEST   = 130    # ~6 meses úteis
 
 CAPITAL_POR_SLOT = CAPITAL_TOTAL / MAX_OPERACOES  # R$ 333,33
 
