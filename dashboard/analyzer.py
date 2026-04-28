@@ -141,6 +141,10 @@ def analisar_todos_pares(pares: list) -> list:
             pl_atual   = pos.calcular_pl(p, dados["preco_a"], dados["preco_b"], quantidade)
 
             lucro_alvo_pos  = p.get("lucro_alvo") or 0.0
+            if lucro_alvo_pos == 0:
+                qty_fb = p.get("quantidade_mt5") or 1
+                capital_fb = (p["preco_entrada_a"] * qty_fb) + (p["preco_entrada_b"] * qty_fb)
+                lucro_alvo_pos = round(capital_fb * cfg_op.get_percentual_lucro() / 100, 2)
             corr_minima     = cfg_op.get_correlacao_minima()
             correlacao_atual = dados.get("correlacao", 1.0)
 
@@ -249,6 +253,9 @@ def executar_ciclo(resultados: list):
             quantidade     = p.get("quantidade_mt5") or 10
             pl_atual       = pos.calcular_pl(p, r["preco_a"], r["preco_b"], quantidade)
             lucro_alvo_pos = p.get("lucro_alvo") or 0.0
+            if lucro_alvo_pos == 0:
+                capital_fb = (p["preco_entrada_a"] * quantidade) + (p["preco_entrada_b"] * quantidade)
+                lucro_alvo_pos = round(capital_fb * cfg_op.get_percentual_lucro() / 100, 2)
 
             motivo = None
             if lucro_alvo_pos > 0 and pl_atual >= lucro_alvo_pos:
@@ -261,6 +268,14 @@ def executar_ciclo(resultados: list):
             if motivo:
                 _log.info(f"[EXEC] Fechando {r['par_a']}/{r['par_b']} motivo={motivo} pl={pl_atual:.2f} alvo={lucro_alvo_pos:.2f}")
                 gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao)
+                pos.fechar_posicao(
+                    pos_id        = p["id"],
+                    preco_saida_a = r["preco_a"],
+                    preco_saida_b = r["preco_b"],
+                    zscore_saida  = z,
+                    quantidade    = quantidade,
+                    motivo        = motivo,
+                )
 
 
 # ── Histórico de oportunidades ───────────────────────────────

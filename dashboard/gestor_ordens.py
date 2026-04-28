@@ -301,15 +301,13 @@ def executar_par(par_a: str, par_b: str, sinal: str,
 # ── Fechar par no MT5 ────────────────────────────────────────
 
 def fechar_par_mt5(par_a: str, par_b: str, simulacao: bool = True) -> dict:
-    """Fecha posições abertas dos dois símbolos do par."""
+    """Fecha posições abertas dos dois símbolos do par (robô e manuais)."""
     resultados = {}
     for symbol in [par_a, par_b]:
         positions = mt5.positions_get(symbol=symbol)
         if not positions:
             continue
         for p in positions:
-            if p.magic != MAGIC:
-                continue
             tipo_fechamento = (mt5.ORDER_TYPE_SELL
                                if p.type == mt5.POSITION_TYPE_BUY
                                else mt5.ORDER_TYPE_BUY)
@@ -392,16 +390,19 @@ def sincronizar_posicoes_mt5(pares: list) -> dict:
             qty         = int(min(sell_a.volume, buy_b.volume))
 
         if sinal:
+            capital_manual = round((preco_a_ent * qty) + (preco_b_ent * qty), 2)
+            lucro_alvo_manual = round(capital_manual * cfg.get_percentual_lucro() / 100, 2)
             pos.abrir_posicao(
-                par_a     = par_a,
-                par_b     = par_b,
-                setor     = par["setor"],
-                sinal     = sinal,
-                zscore    = 0.0,       # desconhecido para posições manuais
-                preco_a   = preco_a_ent,
-                preco_b   = preco_b_ent,
+                par_a      = par_a,
+                par_b      = par_b,
+                setor      = par["setor"],
+                sinal      = sinal,
+                zscore     = 0.0,       # desconhecido para posições manuais
+                preco_a    = preco_a_ent,
+                preco_b    = preco_b_ent,
                 quantidade = qty,
-                origem    = "manual",
+                origem     = "manual",
+                lucro_alvo = lucro_alvo_manual,
             )
             logger.info(f"[SYNC MT5] Importada: {par_a}/{par_b} {sinal} "
                         f"preco_a={preco_a_ent} preco_b={preco_b_ent} qty={qty}")
