@@ -31,13 +31,16 @@ def _salvar(posicoes: list):
 def abrir_posicao(par_a: str, par_b: str, setor: str, sinal: str,
                   zscore: float, preco_a: float, preco_b: float,
                   quantidade: int = None, origem: str = "robo",
-                  lucro_alvo: float = None):
+                  lucro_alvo: float = None,
+                  ticket_a: int = None, ticket_b: int = None):
     """
     Registra uma nova posição aberta.
     Ignora se já existe posição aberta para esse par.
 
     origem: "robo" (execução automática) ou "manual" (importada do MT5)
     quantidade: volume real do MT5, usado no cálculo de P&L ao fechar
+    ticket_a/ticket_b: tickets MT5 de cada perna — permite fechar par específico
+                       mesmo quando mesmo ativo está em múltiplas operações
     """
     posicoes = _carregar()
 
@@ -61,6 +64,8 @@ def abrir_posicao(par_a: str, par_b: str, setor: str, sinal: str,
         "status":          "aberta",
         "origem":          origem,
         "quantidade_mt5":  quantidade,
+        "ticket_a":        ticket_a,
+        "ticket_b":        ticket_b,
         "lucro_alvo":      round(lucro_alvo, 2) if lucro_alvo is not None else None,
         "data_fechamento": None,
         "preco_saida_a":   None,

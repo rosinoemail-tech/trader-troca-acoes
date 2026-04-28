@@ -163,6 +163,11 @@ def analisar_todos_pares(pares: list) -> list:
                 motivo = "zscore"
 
             if motivo:
+                import gestor_ordens as _gestor
+                simulacao_flag = cfg_op.is_simulacao() if hasattr(cfg_op, 'is_simulacao') else True
+                _gestor.fechar_par_mt5(dados["par_a"], dados["par_b"], simulacao_flag,
+                                       ticket_a=p.get("ticket_a"),
+                                       ticket_b=p.get("ticket_b"))
                 pos.fechar_posicao(
                     pos_id        = p["id"],
                     preco_saida_a = dados["preco_a"],
@@ -267,7 +272,9 @@ def executar_ciclo(resultados: list):
 
             if motivo:
                 _log.info(f"[EXEC] Fechando {r['par_a']}/{r['par_b']} motivo={motivo} pl={pl_atual:.2f} alvo={lucro_alvo_pos:.2f}")
-                gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao)
+                gestor.fechar_par_mt5(r["par_a"], r["par_b"], simulacao,
+                                      ticket_a=p.get("ticket_a"),
+                                      ticket_b=p.get("ticket_b"))
                 pos.fechar_posicao(
                     pos_id        = p["id"],
                     preco_saida_a = r["preco_a"],

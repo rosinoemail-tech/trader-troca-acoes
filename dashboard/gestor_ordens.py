@@ -290,7 +290,9 @@ def executar_par(par_a: str, par_b: str, sinal: str,
         lucro_alvo = round(custo * cfg.get_percentual_lucro() / 100, 2)
         logger.info(f"✅ Executado: {descricao} | "
                     f"A ticket={res_a['ticket']} B ticket={res_b['ticket']} | Alvo R${lucro_alvo:.2f}")
-        pos.abrir_posicao(par_a, par_b, setor, sinal, zscore, preco_a, preco_b, lucro_alvo=lucro_alvo)
+        pos.abrir_posicao(par_a, par_b, setor, sinal, zscore, preco_a, preco_b,
+                          lucro_alvo=lucro_alvo,
+                          ticket_a=res_a["ticket"], ticket_b=res_b["ticket"])
     else:
         logger.error(f"❌ Erro ao executar {descricao}: A={res_a} B={res_b}")
 
@@ -300,13 +302,24 @@ def executar_par(par_a: str, par_b: str, sinal: str,
 
 # ── Fechar par no MT5 ────────────────────────────────────────
 
-def fechar_par_mt5(par_a: str, par_b: str, simulacao: bool = True) -> dict:
-    """Fecha posições abertas dos dois símbolos do par (robô e manuais)."""
+def fechar_par_mt5(par_a: str, par_b: str, simulacao: bool = True,
+                   ticket_a: int = None, ticket_b: int = None) -> dict:
+    """
+    Fecha as duas pernas do par no MT5.
+
+    Se ticket_a/ticket_b informados: fecha posição específica pelo ticket.
+    Fallback sem ticket: fecha todas as posições do símbolo (comportamento legado).
+    """
     resultados = {}
-    for symbol in [par_a, par_b]:
-        positions = mt5.positions_get(symbol=symbol)
+    for symbol, ticket in [(par_a, ticket_a), (par_b, ticket_b)]:
+        if ticket:
+            positions = mt5.positions_get(ticket=ticket)
+        else:
+            positions = mt5.positions_get(symbol=symbol)
+
         if not positions:
             continue
+
         for p in positions:
             tipo_fechamento = (mt5.ORDER_TYPE_SELL
                                if p.type == mt5.POSITION_TYPE_BUY
@@ -375,12 +388,17 @@ def sincronizar_posicoes_mt5(pares: list) -> dict:
         preco_b_ent = None
         qty         = None
 
+        tkt_a = None
+        tkt_b = None
+
         # COMPRAR_A: BUY par_a + SELL par_b
         if buy_a and sell_b:
             sinal       = "COMPRAR_A"
             preco_a_ent = buy_a.price_open
             preco_b_ent = sell_b.price_open
             qty         = int(min(buy_a.volume, sell_b.volume))
+            tkt_a       = buy_a.ticket
+            tkt_b       = sell_b.ticket
 
         # VENDER_A: SELL par_a + BUY par_b
         elif sell_a and buy_b:
@@ -388,6 +406,8 @@ def sincronizar_posicoes_mt5(pares: list) -> dict:
             preco_a_ent = sell_a.price_open
             preco_b_ent = buy_b.price_open
             qty         = int(min(sell_a.volume, buy_b.volume))
+            tkt_a       = sell_a.ticket
+            tkt_b       = buy_b.ticket
 
         if sinal:
             capital_manual = round((preco_a_ent * qty) + (preco_b_ent * qty), 2)
@@ -397,12 +417,14 @@ def sincronizar_posicoes_mt5(pares: list) -> dict:
                 par_b      = par_b,
                 setor      = par["setor"],
                 sinal      = sinal,
-                zscore     = 0.0,       # desconhecido para posições manuais
+                zscore     = 0.0,
                 preco_a    = preco_a_ent,
                 preco_b    = preco_b_ent,
                 quantidade = qty,
                 origem     = "manual",
                 lucro_alvo = lucro_alvo_manual,
+                ticket_a   = tkt_a,
+                ticket_b   = tkt_b,
             )
             logger.info(f"[SYNC MT5] Importada: {par_a}/{par_b} {sinal} "
                         f"preco_a={preco_a_ent} preco_b={preco_b_ent} qty={qty}")
